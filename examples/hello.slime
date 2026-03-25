@@ -1,0 +1,7 @@
+target wasm {
+    dom = true
+}
+
+fn main() {
+    print("Hello from SLIME!");
+}

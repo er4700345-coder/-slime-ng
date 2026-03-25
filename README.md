@@ -15,3 +15,9 @@ target native { gc = false }
 fn main() {
     print("Hello from SLIME!");
 }
+
+## Quick Start
+
+```bash
+cargo build --release
+./target/release/slimec build examples/hello.slime

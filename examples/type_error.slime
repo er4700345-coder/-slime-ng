@@ -1,0 +1,6 @@
+fn main() {
+    let x: i32 = 42;
+    let y = "hello";
+    let good = x + 10;
+    let bad = x + y;
+}

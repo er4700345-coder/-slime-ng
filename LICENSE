@@ -1,0 +1,12 @@
+examples/hello.slime
+
+```slime
+fn greet(name: string) -> string {
+    return "Hello, " + name;
+}
+
+fn main() {
+    let msg = greet("SLIME");
+    print(msg);
+}
+

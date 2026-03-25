@@ -1,0 +1,38 @@
+(* SLIME v0.1 Grammar *)
+
+program = { declaration } ;
+
+declaration = function | target | import ;
+
+target = "target", identifier, "{", { target_option }, "}" ;
+target_option = identifier, "=", literal ;
+
+function = "fn", identifier, "(", [ parameters ], ")", [ "->", type ], block ;
+parameters = parameter, { ",", parameter } ;
+parameter = identifier, ":", type ;
+
+type = "i32" | "i64" | "f32" | "f64" | "bool" | "string" | "void" | identifier ;
+
+block = "{", { statement }, "}" ;
+
+statement = let_stmt | return_stmt | expr_stmt ;
+let_stmt = "let", identifier, [ ":", type ], "=", expression, ";" ;
+return_stmt = "return", [ expression ], ";" ;
+expr_stmt = expression, ";" ;
+
+expression = literal | identifier | call | binary | unary ;
+call = identifier, "(", [ arguments ], ")" ;
+arguments = expression, { ",", expression } ;
+binary = expression, operator, expression ;
+unary = operator, expression ;
+
+operator = "+" | "-" | "*" | "/" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" | "!" ;
+
+literal = integer | float | string | "true" | "false" ;
+integer = digit, { digit } ;
+float = digit, { digit }, ".", digit, { digit } ;
+string = '"', { character }, '"' ;
+
+identifier = letter, { letter | digit | "_" } ;
+digit = "0" | ... | "9" ;
+letter = "a" | ... | "z" | "A" | ... | "Z" ;

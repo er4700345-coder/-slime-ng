@@ -1,0 +1,12 @@
+[package]
+name = "slime-ng"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "slime"
+path = "src/lib.rs"
+
+[[bin]]
+name = "slimec"
+path = "src/main.rs"

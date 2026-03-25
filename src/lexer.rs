@@ -1,28 +1,17 @@
-// SLIME Lexer v0.1
-// Run at: play.rust-lang.org
+use crate::error::{Error, ErrorKind, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    // Keywords
     Fn, Let, Return, Target, True, False, If, Else, While,
-    
-    // Types
     I32, I64, F32, F64, Bool, String, Void,
-    
-    // Literals
     Identifier(String),
     Integer(i64),
     Float(f64),
     StringLit(String),
-    
-    // Operators
     Arrow, Eq, Neq, Lt, Gt, Lte, Gte, And, Or,
     Assign, Plus, Minus, Star, Slash, Bang,
-    
-    // Delimiters
     LParen, RParen, LBrace, RBrace, LBracket, RBracket,
     Semicolon, Colon, Comma, Dot,
-    
     EOF,
 }
 
@@ -42,6 +31,9 @@ impl Lexer {
             col: 1,
         }
     }
+    
+    pub fn line(&self) -> usize { self.line }
+    pub fn col(&self) -> usize { self.col }
     
     fn peek(&self) -> char {
         self.input.get(self.pos).copied().unwrap_or('\0')
@@ -73,7 +65,7 @@ impl Lexer {
         result
     }
     
-    fn read_number(&mut self) -> Token {
+    fn read_number(&mut self) -> Result<Token> {
         let mut result = String::new();
         while self.peek().is_ascii_digit() {
             result.push(self.advance());
@@ -81,111 +73,145 @@ impl Lexer {
         
         if self.peek() == '.' {
             result.push(self.advance());
+            if !self.peek().is_ascii_digit() {
+                return Err(Error::new(
+                    ErrorKind::LexError,
+                    "Expected digits after decimal point".to_string(),
+                    self.line,
+                    self.col,
+                ));
+            }
             while self.peek().is_ascii_digit() {
                 result.push(self.advance());
             }
-            Token::Float(result.parse().unwrap())
+            Ok(Token::Float(result.parse().unwrap()))
         } else {
-            Token::Integer(result.parse().unwrap())
+            Ok(Token::Integer(result.parse().unwrap()))
         }
     }
     
-    fn read_string(&mut self) -> Token {
-        self.advance(); // consume opening "
+    fn read_string(&mut self) -> Result<Token> {
+        self.advance();
         let mut result = String::new();
         while self.peek() != '"' && self.peek() != '\0' {
+            if self.peek() == '\n' {
+                return Err(Error::new(
+                    ErrorKind::LexError,
+                    "Unterminated string literal".to_string(),
+                    self.line,
+                    self.col,
+                ));
+            }
             result.push(self.advance());
         }
-        self.advance(); // consume closing "
-        Token::StringLit(result)
+        if self.peek() != '"' {
+            return Err(Error::new(
+                ErrorKind::LexError,
+                "Unterminated string literal".to_string(),
+                self.line,
+                self.col,
+            ));
+        }
+        self.advance();
+        Ok(Token::StringLit(result))
     }
     
-    pub fn next_token(&mut self) -> Token {
+    pub fn next_token(&mut self) -> Result<Token> {
         self.skip_whitespace();
         
         match self.peek() {
-            '\0' => Token::EOF,
-            '(' => { self.advance(); Token::LParen }
-            ')' => { self.advance(); Token::RParen }
-            '{' => { self.advance(); Token::LBrace }
-            '}' => { self.advance(); Token::RBrace }
-            '[' => { self.advance(); Token::LBracket }
-            ']' => { self.advance(); Token::RBracket }
-            ';' => { self.advance(); Token::Semicolon }
-            ':' => { self.advance(); Token::Colon }
-            ',' => { self.advance(); Token::Comma }
-            '.' => { self.advance(); Token::Dot }
-            '+' => { self.advance(); Token::Plus }
+            '\0' => Ok(Token::EOF),
+            '(' => { self.advance(); Ok(Token::LParen) }
+            ')' => { self.advance(); Ok(Token::RParen) }
+            '{' => { self.advance(); Ok(Token::LBrace) }
+            '}' => { self.advance(); Ok(Token::RBrace) }
+            '[' => { self.advance(); Ok(Token::LBracket) }
+            ']' => { self.advance(); Ok(Token::RBracket) }
+            ';' => { self.advance(); Ok(Token::Semicolon) }
+            ':' => { self.advance(); Ok(Token::Colon) }
+            ',' => { self.advance(); Ok(Token::Comma) }
+            '.' => { self.advance(); Ok(Token::Dot) }
+            '+' => { self.advance(); Ok(Token::Plus) }
             '-' => {
                 self.advance();
                 if self.peek() == '>' {
                     self.advance();
-                    Token::Arrow
+                    Ok(Token::Arrow)
                 } else {
-                    Token::Minus
+                    Ok(Token::Minus)
                 }
             }
-            '*' => { self.advance(); Token::Star }
-            '/' => { self.advance(); Token::Slash }
+            '*' => { self.advance(); Ok(Token::Star) }
+            '/' => { self.advance(); Ok(Token::Slash) }
             '!' => {
                 self.advance();
                 if self.peek() == '=' {
                     self.advance();
-                    Token::Neq
+                    Ok(Token::Neq)
                 } else {
-                    Token::Bang
+                    Ok(Token::Bang)
                 }
             }
             '=' => {
                 self.advance();
                 if self.peek() == '=' {
                     self.advance();
-                    Token::Eq
+                    Ok(Token::Eq)
                 } else {
-                    Token::Assign
+                    Ok(Token::Assign)
                 }
             }
             '<' => {
                 self.advance();
                 if self.peek() == '=' {
                     self.advance();
-                    Token::Lte
+                    Ok(Token::Lte)
                 } else {
-                    Token::Lt
+                    Ok(Token::Lt)
                 }
             }
             '>' => {
                 self.advance();
                 if self.peek() == '=' {
                     self.advance();
-                    Token::Gte
+                    Ok(Token::Gte)
                 } else {
-                    Token::Gt
+                    Ok(Token::Gt)
                 }
             }
             '&' => {
                 self.advance();
                 if self.peek() == '&' {
                     self.advance();
-                    Token::And
+                    Ok(Token::And)
                 } else {
-                    panic!("Unexpected character: &")
+                    Err(Error::new(
+                        ErrorKind::LexError,
+                        "Unexpected character: &".to_string(),
+                        self.line,
+                        self.col,
+                    ))
                 }
             }
             '|' => {
                 self.advance();
                 if self.peek() == '|' {
                     self.advance();
-                    Token::Or
+                    Ok(Token::Or)
                 } else {
-                    panic!("Unexpected character: |")
+                    Err(Error::new(
+                        ErrorKind::LexError,
+                        "Unexpected character: |".to_string(),
+                        self.line,
+                        self.col,
+                    ))
                 }
             }
             '"' => self.read_string(),
             ch if ch.is_ascii_digit() => self.read_number(),
             ch if ch.is_alphabetic() || ch == '_' => {
                 let ident = self.read_identifier();
-                match ident.as_str() {
+                Ok(match ident.as_str() {
                     "fn" => Token::Fn,
                     "let" => Token::Let,
                     "return" => Token::Return,
@@ -203,25 +229,14 @@ impl Lexer {
                     "string" => Token::String,
                     "void" => Token::Void,
                     _ => Token::Identifier(ident),
-                }
+                })
             }
-            ch => panic!("Unexpected character: {} at line {}, col {}", ch, self.line, self.col),
+            ch => Err(Error::new(
+                ErrorKind::LexError,
+                format!("Unexpected character: {}", ch),
+                self.line,
+                self.col,
+            )),
         }
-    }
-}
-
-fn main() {
-    let input = r#"
-        fn main() {
-            let x = 42;
-            let y = "hello";
-        }
-    "#;
-    
-    let mut lexer = Lexer::new(input);
-    loop {
-        let tok = lexer.next_token();
-        println!("{:?}", tok);
-        if tok == Token::EOF { break; }
     }
 }

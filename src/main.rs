@@ -7,20 +7,24 @@ use slime::typechecker::TypeChecker;
 use slime::wasm::WasmBackend;
 use slime::wasm_binary::WasmBinaryBackend;
 use slime::native::NativeBackend;
+use slime::pkg;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
+    if args.len() < 2 {
+        print_help();
+        return;
+    }
+
+    // slimec pkg <subcommand> [args]
+    if args[1] == "pkg" {
+        pkg::run_pkg_command(&args[2..]);
+        return;
+    }
+
     if args.len() < 3 {
-        eprintln!("Usage: slimec <command> <file>");
-        eprintln!("Commands:");
-        eprintln!("  lex          - Tokenize and print tokens");
-        eprintln!("  parse        - Parse and print AST");
-        eprintln!("  check        - Type check the program");
-        eprintln!("  compile      - Compile to WASM text format (WAT)");
-        eprintln!("  build        - Full pipeline to .wat file");
-        eprintln!("  build-bin    - Full pipeline to .wasm binary");
-        eprintln!("  build-native - Compile to native object file (.o)");
+        print_help();
         return;
     }
 
@@ -45,6 +49,28 @@ fn main() {
         "build-native" => cmd_build_native(&source, filepath),
         _              => eprintln!("Unknown command: {}", command),
     }
+}
+
+fn print_help() {
+    eprintln!("Usage: slimec <command> <file>");
+    eprintln!("       slimec pkg <subcommand>\n");
+    eprintln!("Compiler commands:");
+    eprintln!("  lex          - Tokenize and print tokens");
+    eprintln!("  parse        - Parse and print AST");
+    eprintln!("  check        - Type check the program");
+    eprintln!("  compile      - Compile to WASM text format (WAT)");
+    eprintln!("  build        - Full pipeline to .wat file");
+    eprintln!("  build-bin    - Full pipeline to .wasm binary");
+    eprintln!("  build-native - Compile to native object file (.o)\n");
+    eprintln!("Package manager:");
+    eprintln!("  pkg init              Create slime.toml");
+    eprintln!("  pkg install           Install dependencies");
+    eprintln!("  pkg add <n>        Add a dependency");
+    eprintln!("  pkg remove <n>     Remove a dependency");
+    eprintln!("  pkg search <query>    Search the registry");
+    eprintln!("  pkg publish           Publish to registry");
+    eprintln!("  pkg list              List installed packages");
+    eprintln!("  pkg info <n>       Show package info");
 }
 
 fn cmd_lex(source: &str) {
@@ -99,14 +125,12 @@ fn cmd_build_binary(source: &str, filepath: &str) {
     let lexer = Lexer::new(source).expect("Lex failed");
     let mut parser = Parser::new(lexer);
     let ast = parser.parse();
-
     let mut checker = TypeChecker::new();
     checker.check_program(&ast);
     if checker.has_errors() {
         checker.report_errors();
         std::process::exit(1);
     }
-
     let mut backend = WasmBinaryBackend::new();
     let wasm = backend.compile(&ast);
     let output_path = filepath.replace(".slime", ".wasm");
@@ -116,24 +140,19 @@ fn cmd_build_binary(source: &str, filepath: &str) {
 
 fn cmd_build_native(source: &str, filepath: &str) {
     println!("Compiling {} to native...", filepath);
-
     let lexer = Lexer::new(source).expect("Lex failed");
     let mut parser = Parser::new(lexer);
     let ast = parser.parse();
-
     let mut checker = TypeChecker::new();
     checker.check_program(&ast);
     if checker.has_errors() {
         checker.report_errors();
         std::process::exit(1);
     }
-
     let mut backend = NativeBackend::new();
     let obj_bytes = backend.compile(&ast);
-
     let output_path = filepath.replace(".slime", ".o");
     fs::write(&output_path, obj_bytes).expect("Write failed");
-
     println!("Object file: {}", output_path);
     println!("Link with:   cc {} -o {}", output_path, output_path.replace(".o", ""));
 }

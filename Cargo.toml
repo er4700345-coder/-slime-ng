@@ -1,22 +1,28 @@
 [package]
-name = "slime-ng"
+name = "slime"
 version = "0.1.0"
 edition = "2021"
-authors = ["SLIME Team"]
-description = "Systems Language for Interactive Multiplatform Execution"
+authors = ["D.S. Ofuowoicho"]
+description = "SLIME — Systems Language for Interactive Multiplatform Execution"
 license = "MIT"
-repository = "https://github.com/yourusername/slime-ng"
-
-[dependencies]
-
-[lib]
-name = "slime"
-path = "src/lib.rs"
 
 [[bin]]
 name = "slimec"
 path = "src/main.rs"
 
+[lib]
+name = "slime"
+path = "src/lib.rs"
+
+[dependencies]
+cranelift            = "0.110"
+cranelift-module     = "0.110"
+cranelift-object     = "0.110"
+cranelift-native     = "0.110"
+target-lexicon       = "0.12"
+
 [profile.release]
 opt-level = 3
 lto = true
+codegen-units = 1
+strip = true

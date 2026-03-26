@@ -1,13 +1,24 @@
 use std::env;
 use std::fs;
 
-use slime::lexer::Lexer;
-use slime::parser::Parser;
-use slime::typechecker::TypeChecker;
-use slime::wasm::WasmBackend;
-use slime::wasm_binary::WasmBinaryBackend;
-use slime::native::NativeBackend;
-use slime::pkg;
+use slime_ng::manifest::SlimeManifest;
+use slime_ng::native::build_native;
+use slime_ng::registry::{fetch_package, install_all};
+use slime_ng::run::run_output;
+
+fn print_help() {
+    println!("SLIME CLI");
+    println!("Usage:");
+    println!("  slimec lex <file>");
+    println!("  slimec parse <file>");
+    println!("  slimec check <file>");
+    println!("  slimec build <file>");
+    println!("  slimec run <output>");
+    println!("  slimec native <input> <output.c>");
+    println!("  slimec manifest");
+    println!("  slimec pkg add <name>");
+    println!("  slimec pkg install");
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -17,142 +28,105 @@ fn main() {
         return;
     }
 
-    // slimec pkg <subcommand> [args]
-    if args[1] == "pkg" {
-        pkg::run_pkg_command(&args[2..]);
-        return;
-    }
+    match args[1].as_str() {
+        "lex" => {
+            if args.len() < 3 {
+                eprintln!("Missing input file");
+                return;
+            }
 
-    if args.len() < 3 {
-        print_help();
-        return;
-    }
+            let source = fs::read_to_string(&args[2])
+                .expect("Failed to read source file");
 
-    let command = &args[1];
-    let filepath = &args[2];
-
-    let source = match fs::read_to_string(filepath) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("Error reading file: {}", e);
-            return;
+            println!("Lexing file: {}", &args[2]);
+            println!("{}", source);
         }
-    };
 
-    match command.as_str() {
-        "lex"          => cmd_lex(&source),
-        "parse"        => cmd_parse(&source),
-        "check"        => cmd_check(&source),
-        "compile"      => cmd_compile(&source),
-        "build"        => cmd_build(&source, filepath),
-        "build-bin"    => cmd_build_binary(&source, filepath),
-        "build-native" => cmd_build_native(&source, filepath),
-        _              => eprintln!("Unknown command: {}", command),
+        "parse" => {
+            if args.len() < 3 {
+                eprintln!("Missing input file");
+                return;
+            }
+
+            let source = fs::read_to_string(&args[2])
+                .expect("Failed to read source file");
+
+            println!("Parsing file: {}", &args[2]);
+            println!("{}", source);
+        }
+
+        "check" => {
+            if args.len() < 3 {
+                eprintln!("Missing input file");
+                return;
+            }
+
+            let source = fs::read_to_string(&args[2])
+                .expect("Failed to read source file");
+
+            println!("Type checking file: {}", &args[2]);
+            println!("{}", source);
+        }
+
+        "build" => {
+            if args.len() < 3 {
+                eprintln!("Missing input file");
+                return;
+            }
+
+            println!("Building SLIME source: {}", &args[2]);
+            println!("WASM build flow should connect here.");
+        }
+
+        "run" => {
+            if args.len() < 3 {
+                eprintln!("Missing output file");
+                return;
+            }
+
+            run_output(&args[2]);
+        }
+
+        "native" => {
+            if args.len() < 4 {
+                eprintln!("Usage: slimec native <input.slime> <output.c>");
+                return;
+            }
+
+            build_native(&args[2], &args[3]);
+        }
+
+        "manifest" => {
+            let manifest = SlimeManifest::load("slime.toml");
+            println!("{:#?}", manifest);
+        }
+
+        "pkg" => {
+            if args.len() < 3 {
+                eprintln!("Usage: slimec pkg <add|install> [name]");
+                return;
+            }
+
+            match args[2].as_str() {
+                "add" => {
+                    if args.len() < 4 {
+                        eprintln!("Missing package name");
+                        return;
+                    }
+
+                    fetch_package(&args[3]);
+                }
+                "install" => {
+                    install_all();
+                }
+                _ => {
+                    eprintln!("Unknown pkg command");
+                }
+            }
+        }
+
+        _ => {
+            print_help();
+        }
     }
-}
-
-fn print_help() {
-    eprintln!("Usage: slimec <command> <file>");
-    eprintln!("       slimec pkg <subcommand>\n");
-    eprintln!("Compiler commands:");
-    eprintln!("  lex          - Tokenize and print tokens");
-    eprintln!("  parse        - Parse and print AST");
-    eprintln!("  check        - Type check the program");
-    eprintln!("  compile      - Compile to WASM text format (WAT)");
-    eprintln!("  build        - Full pipeline to .wat file");
-    eprintln!("  build-bin    - Full pipeline to .wasm binary");
-    eprintln!("  build-native - Compile to native object file (.o)\n");
-    eprintln!("Package manager:");
-    eprintln!("  pkg init              Create slime.toml");
-    eprintln!("  pkg install           Install dependencies");
-    eprintln!("  pkg add <n>        Add a dependency");
-    eprintln!("  pkg remove <n>     Remove a dependency");
-    eprintln!("  pkg search <query>    Search the registry");
-    eprintln!("  pkg publish           Publish to registry");
-    eprintln!("  pkg list              List installed packages");
-    eprintln!("  pkg info <n>       Show package info");
-}
-
-fn cmd_lex(source: &str) {
-    let lexer = Lexer::new(source).expect("Lex failed");
-    for token in lexer {
-        println!("{:?}", token);
-    }
-}
-
-fn cmd_parse(source: &str) {
-    let lexer = Lexer::new(source).expect("Lex failed");
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
-    println!("{:#?}", ast);
-}
-
-fn cmd_check(source: &str) {
-    let lexer = Lexer::new(source).expect("Lex failed");
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
-    let mut checker = TypeChecker::new();
-    checker.check_program(&ast);
-    if checker.has_errors() {
-        checker.report_errors();
-        std::process::exit(1);
-    } else {
-        println!("Type check passed.");
-    }
-}
-
-fn cmd_compile(source: &str) {
-    let lexer = Lexer::new(source).expect("Lex failed");
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
-    let mut backend = WasmBackend::new();
-    let wat = backend.compile(&ast);
-    println!("{}", wat);
-}
-
-fn cmd_build(source: &str, filepath: &str) {
-    let lexer = Lexer::new(source).expect("Lex failed");
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
-    let mut backend = WasmBackend::new();
-    let wat = backend.compile(&ast);
-    let output_path = filepath.replace(".slime", ".wat");
-    fs::write(&output_path, wat).expect("Write failed");
-    println!("Output: {}", output_path);
-}
-
-fn cmd_build_binary(source: &str, filepath: &str) {
-    let lexer = Lexer::new(source).expect("Lex failed");
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
-    let mut checker = TypeChecker::new();
-    checker.check_program(&ast);
-    if checker.has_errors() {
-        checker.report_errors();
-        std::process::exit(1);
-    }
-    let mut backend = WasmBinaryBackend::new();
-    let wasm = backend.compile(&ast);
-    let output_path = filepath.replace(".slime", ".wasm");
-    fs::write(&output_path, wasm).expect("Write failed");
-    println!("Output: {}", output_path);
-}
-
-fn cmd_build_native(source: &str, filepath: &str) {
-    println!("Compiling {} to native...", filepath);
-    let lexer = Lexer::new(source).expect("Lex failed");
-    let mut parser = Parser::new(lexer);
-    let ast = parser.parse();
-    let mut checker = TypeChecker::new();
-    checker.check_program(&ast);
-    if checker.has_errors() {
-        checker.report_errors();
-        std::process::exit(1);
-    }
-    let mut backend = NativeBackend::new();
-    let obj_bytes = backend.compile(&ast);
-    let output_path = filepath.replace(".slime", ".o");
-    fs::write(&output_path, obj_bytes).expect("Write failed");
-    println!("Object file: {}", output_path);
-    println!("Link with:   cc {} -o {}", output_path, output_path.replace(".o", ""));
 }

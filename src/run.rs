@@ -1,11 +1,13 @@
 use std::process::Command;
 
-pub fn run_wasm_output(output_file: &str) {
-    println!("Running SLIME output: {}", output_file);
+pub fn run_output(output_file: &str) {
+    println!("Running output: {}", output_file);
 
-    let result = Command::new("node")
-        .arg(output_file)
-        .status();
+    let result = if output_file.ends_with(".js") {
+        Command::new("node").arg(output_file).status()
+    } else {
+        Command::new(output_file).status()
+    };
 
     match result {
         Ok(status) => {

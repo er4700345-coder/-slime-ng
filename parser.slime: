@@ -1,0 +1,496 @@
+// bootstrap/parser.slime
+// SLIME Parser â€” written in SLIME itself (Stage 2 of self-hosting)
+// Reads the token buffer produced by lexer.slime and builds an AST
+// encoded as a flat node array in linear memory.
+//
+// AST Node layout (32 bytes each):
+//   [0]  node_type  (i32)
+//   [4]  child_a    (i32) â€” index of first child, or literal value
+//   [8]  child_b    (i32) â€” index of second child
+//   [12] child_c    (i32) â€” index of third child
+//   [16] tok_start  (i32) â€” source offset for error reporting
+//   [20] tok_len    (i32)
+//   [24] tok_line   (i32)
+//   [28] tok_col    (i32)
+
+// â”€â”€ Node types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+let NODE_PROGRAM:    i32 = 0;
+let NODE_FN_DECL:   i32 = 1;
+let NODE_PARAM:     i32 = 2;
+let NODE_BLOCK:     i32 = 3;
+let NODE_LET:       i32 = 4;
+let NODE_RETURN:    i32 = 5;
+let NODE_IF:        i32 = 6;
+let NODE_WHILE:     i32 = 7;
+let NODE_EXPR_STMT: i32 = 8;
+let NODE_ASSIGN:    i32 = 9;
+let NODE_BINARY:    i32 = 10;
+let NODE_UNARY:     i32 = 11;
+let NODE_CALL:      i32 = 12;
+let NODE_IDENT:     i32 = 13;
+let NODE_INT:       i32 = 14;
+let NODE_FLOAT:     i32 = 15;
+let NODE_STRING:    i32 = 16;
+let NODE_BOOL:      i32 = 17;
+
+// â”€â”€ Binary op codes (stored in child_c of NODE_BINARY) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+let OP_ADD: i32 = 0;
+let OP_SUB: i32 = 1;
+let OP_MUL: i32 = 2;
+let OP_DIV: i32 = 3;
+let OP_EQ:  i32 = 4;
+let OP_NEQ: i32 = 5;
+let OP_LT:  i32 = 6;
+let OP_GT:  i32 = 7;
+let OP_LE:  i32 = 8;
+let OP_GE:  i32 = 9;
+let OP_AND: i32 = 10;
+let OP_OR:  i32 = 11;
+
+// â”€â”€ Parser memory layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// Token buffer starts at address 20 (from lexer)
+let TOK_BUF_BASE: i32  = 24;   // first token record
+let TOK_SIZE: i32       = 20;   // bytes per token
+
+// AST node buffer starts at address 8192
+let AST_BASE: i32       = 8192;
+let AST_NODE_SIZE: i32  = 32;
+
+// Parser state
+let P_TOK_IDX: i32      = 4096;  // current token index (i32)
+let P_TOK_COUNT: i32    = 4100;  // total tokens (i32)
+let P_NODE_COUNT: i32   = 4104;  // nodes allocated so far (i32)
+let P_ERR_COUNT: i32    = 4108;  // parse errors (i32)
+
+// â”€â”€ Token accessors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn tok_base(idx: i32) -> i32 {
+    TOK_BUF_BASE + (idx * TOK_SIZE)
+}
+
+fn tok_type(idx: i32) -> i32 {
+    mem_read_i32(tok_base(idx))
+}
+
+fn tok_start(idx: i32) -> i32 {
+    mem_read_i32(tok_base(idx) + 4)
+}
+
+fn tok_len(idx: i32) -> i32 {
+    mem_read_i32(tok_base(idx) + 8)
+}
+
+fn tok_line(idx: i32) -> i32 {
+    mem_read_i32(tok_base(idx) + 12)
+}
+
+fn tok_col(idx: i32) -> i32 {
+    mem_read_i32(tok_base(idx) + 16)
+}
+
+// â”€â”€ Parser state accessors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn get_tok_idx() -> i32 {
+    mem_read_i32(P_TOK_IDX)
+}
+
+fn set_tok_idx(i: i32) -> i32 {
+    mem_write_i32(P_TOK_IDX, i)
+}
+
+fn peek_tok() -> i32 {
+    tok_type(get_tok_idx())
+}
+
+fn advance_tok() -> i32 {
+    let idx: i32 = get_tok_idx();
+    let t: i32 = tok_type(idx);
+    set_tok_idx(idx + 1);
+    t
+}
+
+fn expect_tok(expected: i32) -> i32 {
+    let t: i32 = peek_tok();
+    if t == expected {
+        advance_tok()
+    } else {
+        mem_write_i32(P_ERR_COUNT, mem_read_i32(P_ERR_COUNT) + 1);
+        -1
+    }
+}
+
+// â”€â”€ AST node allocation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn alloc_node(ntype: i32, ca: i32, cb: i32, cc: i32) -> i32 {
+    let count: i32 = mem_read_i32(P_NODE_COUNT);
+    let base: i32 = AST_BASE + (count * AST_NODE_SIZE);
+    let idx: i32 = get_tok_idx();
+    mem_write_i32(base,      ntype);
+    mem_write_i32(base + 4,  ca);
+    mem_write_i32(base + 8,  cb);
+    mem_write_i32(base + 12, cc);
+    mem_write_i32(base + 16, tok_start(idx));
+    mem_write_i32(base + 20, tok_len(idx));
+    mem_write_i32(base + 24, tok_line(idx));
+    mem_write_i32(base + 28, tok_col(idx));
+    mem_write_i32(P_NODE_COUNT, count + 1);
+    count
+}
+
+// â”€â”€ Type parsing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// Type tokens are identifiers: i32, i64, f32, f64, bool, void, str
+// Returns a type code as i32
+let TYPE_I32:  i32 = 1;
+let TYPE_I64:  i32 = 2;
+let TYPE_F32:  i32 = 3;
+let TYPE_F64:  i32 = 4;
+let TYPE_BOOL: i32 = 5;
+let TYPE_VOID: i32 = 6;
+let TYPE_STR:  i32 = 7;
+let TYPE_ANY:  i32 = 8;
+
+fn parse_type() -> i32 {
+    // Peek at identifier and match known type names
+    // Returns type code â€” for now returns TYPE_I32 as default
+    if peek_tok() == 1 { // TOK_IDENT
+        advance_tok();
+        TYPE_I32 // TODO: match actual name bytes
+    } else {
+        TYPE_ANY
+    }
+}
+
+// â”€â”€ Expression parsing (Pratt parser) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn get_prefix_power(tok: i32) -> i32 {
+    if tok == 6  { return 70; } // TOK_MINUS (unary)
+    if tok == 27 { return 70; } // TOK_BANG  (unary not)
+    0
+}
+
+fn get_infix_power(tok: i32) -> i32 {
+    if bool_or(tok == 38, tok == 39) { return 10; } // and, or
+    if tok == 9  { return 20; } // ==
+    if tok == 10 { return 20; } // !=
+    if bool_or(bool_or(tok == 12, tok == 13), bool_or(tok == 14, tok == 15)) { return 30; } // < > <= >=
+    if bool_or(tok == 5, tok == 6)  { return 40; } // + -
+    if bool_or(tok == 7, tok == 8)  { return 50; } // * /
+    0
+}
+
+fn tok_to_binop(tok: i32) -> i32 {
+    if tok == 5  { return OP_ADD; }
+    if tok == 6  { return OP_SUB; }
+    if tok == 7  { return OP_MUL; }
+    if tok == 8  { return OP_DIV; }
+    if tok == 9  { return OP_EQ; }
+    if tok == 10 { return OP_NEQ; }
+    if tok == 12 { return OP_LT; }
+    if tok == 13 { return OP_GT; }
+    if tok == 14 { return OP_LE; }
+    if tok == 15 { return OP_GE; }
+    if tok == 38 { return OP_AND; }
+    if tok == 39 { return OP_OR; }
+    -1
+}
+
+fn parse_expr(min_power: i32) -> i32 {
+    let tok: i32 = peek_tok();
+    let idx: i32 = get_tok_idx();
+
+    // Prefix
+    let left: i32 = parse_primary();
+
+    // Infix loop
+    while 1 {
+        let op_tok: i32 = peek_tok();
+        let power: i32 = get_infix_power(op_tok);
+        if power <= min_power {
+            return left;
+        }
+        advance_tok();
+        let right: i32 = parse_expr(power);
+        let op: i32 = tok_to_binop(op_tok);
+        left = alloc_node(NODE_BINARY, left, right, op);
+    }
+
+    left
+}
+
+fn parse_primary() -> i32 {
+    let tok: i32 = peek_tok();
+    let idx: i32 = get_tok_idx();
+
+    // Integer literal
+    if tok == 2 { // TOK_INT
+        advance_tok();
+        return alloc_node(NODE_INT, tok_start(idx), tok_len(idx), 0);
+    }
+
+    // Float literal
+    if tok == 3 { // TOK_FLOAT
+        advance_tok();
+        return alloc_node(NODE_FLOAT, tok_start(idx), tok_len(idx), 0);
+    }
+
+    // String literal
+    if tok == 4 { // TOK_STRING
+        advance_tok();
+        return alloc_node(NODE_STRING, tok_start(idx), tok_len(idx), 0);
+    }
+
+    // Boolean true
+    if tok == 36 { // TOK_KW_TRUE
+        advance_tok();
+        return alloc_node(NODE_BOOL, 1, 0, 0);
+    }
+
+    // Boolean false
+    if tok == 37 { // TOK_KW_FALSE
+        advance_tok();
+        return alloc_node(NODE_BOOL, 0, 0, 0);
+    }
+
+    // Identifier or function call
+    if tok == 1 { // TOK_IDENT
+        advance_tok();
+        let name_start: i32 = tok_start(idx);
+        let name_len: i32 = tok_len(idx);
+
+        // Function call
+        if peek_tok() == 16 { // TOK_LPAREN
+            advance_tok(); // consume '('
+            let args_node: i32 = parse_arg_list();
+            expect_tok(17); // TOK_RPAREN
+            return alloc_node(NODE_CALL, name_start, name_len, args_node);
+        }
+
+        return alloc_node(NODE_IDENT, name_start, name_len, 0);
+    }
+
+    // Grouped expression
+    if tok == 16 { // TOK_LPAREN
+        advance_tok();
+        let expr: i32 = parse_expr(0);
+        expect_tok(17); // TOK_RPAREN
+        return expr;
+    }
+
+    // Unary minus
+    if tok == 6 { // TOK_MINUS
+        advance_tok();
+        let operand: i32 = parse_expr(70);
+        return alloc_node(NODE_UNARY, operand, OP_SUB, 0);
+    }
+
+    // Unary not
+    if tok == 27 { // TOK_BANG
+        advance_tok();
+        let operand: i32 = parse_expr(70);
+        return alloc_node(NODE_UNARY, operand, OP_NEQ, 0);
+    }
+
+    // Error recovery
+    mem_write_i32(P_ERR_COUNT, mem_read_i32(P_ERR_COUNT) + 1);
+    alloc_node(NODE_INT, 0, 0, 0)
+}
+
+fn parse_arg_list() -> i32 {
+    // Returns index of first arg node; args are linked via child_b
+    if peek_tok() == 17 { // immediate ')'
+        return -1;
+    }
+    let first: i32 = parse_expr(0);
+    let prev: i32 = first;
+    while peek_tok() == 22 { // TOK_COMMA
+        advance_tok();
+        let arg: i32 = parse_expr(0);
+        // Link args: store next arg index in child_b of prev
+        let prev_base: i32 = AST_BASE + (prev * AST_NODE_SIZE);
+        mem_write_i32(prev_base + 8, arg);
+        prev = arg;
+    }
+    first
+}
+
+// â”€â”€ Statement parsing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn parse_stmt() -> i32 {
+    let tok: i32 = peek_tok();
+
+    // let binding
+    if tok == 31 { // TOK_KW_LET
+        advance_tok();
+        let name_idx: i32 = get_tok_idx();
+        expect_tok(1); // TOK_IDENT
+        let name_start: i32 = tok_start(name_idx);
+        let name_len: i32 = tok_len(name_idx);
+        let ty: i32 = 0;
+        if peek_tok() == 23 { // TOK_COLON â€” type annotation
+            advance_tok();
+            ty = parse_type();
+        }
+        expect_tok(9); // TOK_EQ
+        let expr: i32 = parse_expr(0);
+        expect_tok(24); // TOK_SEMICOLON (optional but expected)
+        return alloc_node(NODE_LET, name_start, expr, ty);
+    }
+
+    // return
+    if tok == 35 { // TOK_KW_RETURN
+        advance_tok();
+        if peek_tok() == 24 { // TOK_SEMICOLON
+            advance_tok();
+            return alloc_node(NODE_RETURN, -1, 0, 0);
+        }
+        let expr: i32 = parse_expr(0);
+        return alloc_node(NODE_RETURN, expr, 0, 0);
+    }
+
+    // if
+    if tok == 32 { // TOK_KW_IF
+        advance_tok();
+        let cond: i32 = parse_expr(0);
+        let then_block: i32 = parse_block();
+        let else_block: i32 = -1;
+        if peek_tok() == 33 { // TOK_KW_ELSE
+            advance_tok();
+            else_block = parse_block();
+        }
+        return alloc_node(NODE_IF, cond, then_block, else_block);
+    }
+
+    // while
+    if tok == 34 { // TOK_KW_WHILE
+        advance_tok();
+        let cond: i32 = parse_expr(0);
+        let body: i32 = parse_block();
+        return alloc_node(NODE_WHILE, cond, body, 0);
+    }
+
+    // expression statement (assignment or bare expr)
+    let expr: i32 = parse_expr(0);
+    if peek_tok() == 9 { // TOK_EQ â€” assignment
+        advance_tok();
+        let rhs: i32 = parse_expr(0);
+        return alloc_node(NODE_ASSIGN, expr, rhs, 0);
+    }
+    alloc_node(NODE_EXPR_STMT, expr, 0, 0)
+}
+
+fn parse_block() -> i32 {
+    expect_tok(18); // TOK_LBRACE
+    let first_stmt: i32 = -1;
+    let prev_stmt: i32 = -1;
+
+    while bool_and(not(peek_tok() == 19), not(peek_tok() == 0)) { // not '}' or EOF
+        let stmt: i32 = parse_stmt();
+        if first_stmt == -1 {
+            first_stmt = stmt;
+        } else {
+            // Chain stmts via child_b
+            let prev_base: i32 = AST_BASE + (prev_stmt * AST_NODE_SIZE);
+            mem_write_i32(prev_base + 8, stmt);
+        }
+        prev_stmt = stmt;
+    }
+
+    expect_tok(19); // TOK_RBRACE
+    alloc_node(NODE_BLOCK, first_stmt, 0, 0)
+}
+
+// â”€â”€ Top-level declaration parsing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn parse_fn_decl() -> i32 {
+    expect_tok(30); // TOK_KW_FN
+    let name_idx: i32 = get_tok_idx();
+    expect_tok(1);  // TOK_IDENT
+    let name_start: i32 = tok_start(name_idx);
+    let name_len: i32 = tok_len(name_idx);
+
+    expect_tok(16); // TOK_LPAREN
+    let params: i32 = parse_param_list();
+    expect_tok(17); // TOK_RPAREN
+
+    let ret_ty: i32 = TYPE_VOID;
+    if peek_tok() == 25 { // TOK_ARROW
+        advance_tok();
+        ret_ty = parse_type();
+    }
+
+    let body: i32 = parse_block();
+    alloc_node(NODE_FN_DECL, name_start, body, ret_ty)
+}
+
+fn parse_param_list() -> i32 {
+    if peek_tok() == 17 { return -1; } // empty params
+    let first: i32 = parse_param();
+    let prev: i32 = first;
+    while peek_tok() == 22 { // TOK_COMMA
+        advance_tok();
+        let p: i32 = parse_param();
+        let prev_base: i32 = AST_BASE + (prev * AST_NODE_SIZE);
+        mem_write_i32(prev_base + 8, p);
+        prev = p;
+    }
+    first
+}
+
+fn parse_param() -> i32 {
+    let name_idx: i32 = get_tok_idx();
+    expect_tok(1); // TOK_IDENT
+    expect_tok(23); // TOK_COLON
+    let ty: i32 = parse_type();
+    alloc_node(NODE_PARAM, tok_start(name_idx), tok_len(name_idx), ty)
+}
+
+// â”€â”€ Program entry point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn parse_program(tok_count: i32) -> i32 {
+    mem_write_i32(P_TOK_IDX,   0);
+    mem_write_i32(P_TOK_COUNT, tok_count);
+    mem_write_i32(P_NODE_COUNT, 0);
+    mem_write_i32(P_ERR_COUNT,  0);
+
+    let first_decl: i32 = -1;
+    let prev_decl: i32  = -1;
+
+    while bool_and(not(peek_tok() == 0), not(peek_tok() == -1)) { // not EOF
+        let decl: i32 = -1;
+
+        if peek_tok() == 30 { // TOK_KW_FN
+            decl = parse_fn_decl();
+        } else {
+            // skip unknown top-level token
+            advance_tok();
+            mem_write_i32(P_ERR_COUNT, mem_read_i32(P_ERR_COUNT) + 1);
+        }
+
+        if bool_and(decl != -1, first_decl == -1) {
+            first_decl = decl;
+        }
+        if bool_and(decl != -1, prev_decl != -1) {
+            let prev_base: i32 = AST_BASE + (prev_decl * AST_NODE_SIZE);
+            mem_write_i32(prev_base + 8, decl);
+        }
+        if decl != -1 {
+            prev_decl = decl;
+        }
+    }
+
+    let program: i32 = alloc_node(NODE_PROGRAM, first_decl, mem_read_i32(P_NODE_COUNT), 0);
+    program
+}
+
+fn main() -> i32 {
+    // Called after tokenize() has run
+    let tok_count: i32 = mem_read_i32(20); // TOK_COUNT from lexer
+    let root: i32 = parse_program(tok_count);
+    print_i32(root);
+    print_i32(mem_read_i32(P_ERR_COUNT));
+    0
+}

@@ -1,0 +1,427 @@
+// bootstrap/lexer.slime
+// SLIME Lexer â€” written in SLIME itself (Stage 1 of self-hosting)
+// Compiled by the Rust bootstrap compiler (Stage 0)
+// This tokenizes SLIME source into a flat token stream in linear memory.
+//
+// Memory layout:
+//   [0..4]     source pointer (i32)
+//   [4..8]     source length (i32)
+//   [8..12]    current position (i32)
+//   [12..16]   line number (i32)
+//   [16..20]   column number (i32)
+//   [20..4096] token buffer (type:u8, start:i32, len:i32 per token)
+
+// â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// Token types
+let TOK_EOF: i32       = 0;
+let TOK_IDENT: i32     = 1;
+let TOK_INT: i32       = 2;
+let TOK_FLOAT: i32     = 3;
+let TOK_STRING: i32    = 4;
+let TOK_PLUS: i32      = 5;
+let TOK_MINUS: i32     = 6;
+let TOK_STAR: i32      = 7;
+let TOK_SLASH: i32     = 8;
+let TOK_EQ: i32        = 9;
+let TOK_EQEQ: i32      = 10;
+let TOK_NEQ: i32       = 11;
+let TOK_LT: i32        = 12;
+let TOK_GT: i32        = 13;
+let TOK_LE: i32        = 14;
+let TOK_GE: i32        = 15;
+let TOK_LPAREN: i32    = 16;
+let TOK_RPAREN: i32    = 17;
+let TOK_LBRACE: i32    = 18;
+let TOK_RBRACE: i32    = 19;
+let TOK_LBRACKET: i32  = 20;
+let TOK_RBRACKET: i32  = 21;
+let TOK_COMMA: i32     = 22;
+let TOK_COLON: i32     = 23;
+let TOK_SEMICOLON: i32 = 24;
+let TOK_ARROW: i32     = 25;
+let TOK_DOT: i32       = 26;
+let TOK_BANG: i32      = 27;
+let TOK_AMP: i32       = 28;
+let TOK_PIPE: i32      = 29;
+let TOK_KW_FN: i32     = 30;
+let TOK_KW_LET: i32    = 31;
+let TOK_KW_IF: i32     = 32;
+let TOK_KW_ELSE: i32   = 33;
+let TOK_KW_WHILE: i32  = 34;
+let TOK_KW_RETURN: i32 = 35;
+let TOK_KW_TRUE: i32   = 36;
+let TOK_KW_FALSE: i32  = 37;
+let TOK_KW_AND: i32    = 38;
+let TOK_KW_OR: i32     = 39;
+let TOK_KW_NOT: i32    = 40;
+let TOK_KW_IMPORT: i32 = 41;
+let TOK_KW_PUB: i32    = 42;
+let TOK_KW_MUT: i32    = 43;
+let TOK_UNKNOWN: i32   = 99;
+
+// Memory addresses
+let SRC_PTR: i32    = 0;
+let SRC_LEN: i32    = 4;
+let CUR_POS: i32    = 8;
+let CUR_LINE: i32   = 12;
+let CUR_COL: i32    = 16;
+let TOK_BUF: i32    = 20;   // token buffer starts here
+let TOK_COUNT: i32  = 24;   // number of tokens written
+
+// Token record size: type(4) + start(4) + len(4) + line(4) + col(4) = 20 bytes
+let TOK_SIZE: i32 = 20;
+
+// â”€â”€ Memory helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn mem_read_i32(addr: i32) -> i32 {
+    // Reads 4 bytes at addr as little-endian i32
+    // WASM linear memory load â€” compiler emits i32.load
+    addr  // placeholder: real impl uses i32.load intrinsic
+}
+
+fn mem_write_i32(addr: i32, val: i32) -> i32 {
+    // WASM i32.store intrinsic
+    0
+}
+
+fn mem_read_byte(addr: i32) -> i32 {
+    // WASM i32.load8_u intrinsic
+    0
+}
+
+// â”€â”€ Character classification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn is_alpha(c: i32) -> i32 {
+    // a-z or A-Z or _
+    let lower: i32 = c >= 97;   // 'a'
+    let upper_end: i32 = c <= 122; // 'z'
+    let cap_start: i32 = c >= 65; // 'A'
+    let cap_end: i32 = c <= 90;   // 'Z'
+    let underscore: i32 = c == 95; // '_'
+    bool_or(bool_or(bool_and(lower, upper_end), bool_and(cap_start, cap_end)), underscore)
+}
+
+fn is_digit(c: i32) -> i32 {
+    bool_and(c >= 48, c <= 57) // '0'..'9'
+}
+
+fn is_alnum(c: i32) -> i32 {
+    bool_or(is_alpha(c), is_digit(c))
+}
+
+fn is_whitespace(c: i32) -> i32 {
+    let space: i32 = c == 32;     // ' '
+    let tab: i32 = c == 9;        // '\t'
+    let newline: i32 = c == 10;   // '\n'
+    let cr: i32 = c == 13;        // '\r'
+    bool_or(bool_or(space, tab), bool_or(newline, cr))
+}
+
+// â”€â”€ Lexer state accessors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn get_pos() -> i32 {
+    mem_read_i32(CUR_POS)
+}
+
+fn set_pos(p: i32) -> i32 {
+    mem_write_i32(CUR_POS, p)
+}
+
+fn get_line() -> i32 {
+    mem_read_i32(CUR_LINE)
+}
+
+fn get_col() -> i32 {
+    mem_read_i32(CUR_COL)
+}
+
+fn get_src_len() -> i32 {
+    mem_read_i32(SRC_LEN)
+}
+
+fn current_char() -> i32 {
+    let src: i32 = mem_read_i32(SRC_PTR);
+    let pos: i32 = get_pos();
+    mem_read_byte(src + pos)
+}
+
+fn peek_char(offset: i32) -> i32 {
+    let src: i32 = mem_read_i32(SRC_PTR);
+    let pos: i32 = get_pos();
+    let len: i32 = get_src_len();
+    if pos + offset < len {
+        mem_read_byte(src + pos + offset)
+    } else {
+        0
+    }
+}
+
+fn advance() -> i32 {
+    let c: i32 = current_char();
+    let pos: i32 = get_pos();
+    set_pos(pos + 1);
+    if c == 10 { // newline
+        mem_write_i32(CUR_LINE, get_line() + 1);
+        mem_write_i32(CUR_COL, 0);
+    } else {
+        mem_write_i32(CUR_COL, get_col() + 1);
+    }
+    c
+}
+
+fn at_end() -> i32 {
+    get_pos() >= get_src_len()
+}
+
+// â”€â”€ Skip whitespace and comments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn skip_whitespace() -> i32 {
+    while not(at_end()) {
+        let c: i32 = current_char();
+        if is_whitespace(c) {
+            advance();
+        } else {
+            if bool_and(c == 47, peek_char(1) == 47) { // '//'
+                // Line comment â€” skip to end of line
+                while bool_and(not(at_end()), not(current_char() == 10)) {
+                    advance();
+                }
+            } else {
+                return 0;
+            }
+        }
+    }
+    0
+}
+
+// â”€â”€ Token emission â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn emit_token(tok_type: i32, start: i32, len: i32, line: i32, col: i32) -> i32 {
+    let count: i32 = mem_read_i32(TOK_COUNT);
+    let base: i32 = TOK_BUF + 4 + (count * TOK_SIZE); // +4 to skip count cell
+    mem_write_i32(base,      tok_type);
+    mem_write_i32(base + 4,  start);
+    mem_write_i32(base + 8,  len);
+    mem_write_i32(base + 12, line);
+    mem_write_i32(base + 16, col);
+    mem_write_i32(TOK_COUNT, count + 1);
+    0
+}
+
+// â”€â”€ Keyword matching â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Returns token type for keyword, or TOK_IDENT if not a keyword.
+// Compares bytes manually from source memory.
+
+fn bytes_eq(src: i32, start: i32, kw_ptr: i32, kw_len: i32, tok_len: i32) -> i32 {
+    if tok_len != kw_len {
+        return 0;
+    }
+    let i: i32 = 0;
+    while i < kw_len {
+        let a: i32 = mem_read_byte(src + start + i);
+        let b: i32 = mem_read_byte(kw_ptr + i);
+        if a != b {
+            return 0;
+        }
+        i = i + 1;
+    }
+    1
+}
+
+fn classify_ident(start: i32, len: i32) -> i32 {
+    // Keywords as ASCII codes checked inline (zero-dep approach)
+    // fn=102,110 | let=108,101,116 | if=105,102 | else=101,108,115,101
+    // while=119,104,105,108,101 | return=114,101,116,117,114,110
+    // true=116,114,117,101 | false=102,97,108,115,101
+    // and=97,110,100 | or=111,114 | not=110,111,116
+    // import=105,109,112,111,114,116 | pub=112,117,98 | mut=109,117,116
+    let src: i32 = mem_read_i32(SRC_PTR);
+
+    fn byte_at(i: i32) -> i32 {
+        mem_read_byte(src + start + i)
+    }
+
+    if len == 2 {
+        if bool_and(byte_at(0) == 102, byte_at(1) == 110) { return TOK_KW_FN; }
+        if bool_and(byte_at(0) == 105, byte_at(1) == 102) { return TOK_KW_IF; }
+        if bool_and(byte_at(0) == 111, byte_at(1) == 114) { return TOK_KW_OR; }
+    }
+    if len == 3 {
+        if bool_and(bool_and(byte_at(0) == 108, byte_at(1) == 101), byte_at(2) == 116) { return TOK_KW_LET; }
+        if bool_and(bool_and(byte_at(0) == 97,  byte_at(1) == 110), byte_at(2) == 100) { return TOK_KW_AND; }
+        if bool_and(bool_and(byte_at(0) == 110, byte_at(1) == 111), byte_at(2) == 116) { return TOK_KW_NOT; }
+        if bool_and(bool_and(byte_at(0) == 112, byte_at(1) == 117), byte_at(2) == 98)  { return TOK_KW_PUB; }
+        if bool_and(bool_and(byte_at(0) == 109, byte_at(1) == 117), byte_at(2) == 116) { return TOK_KW_MUT; }
+    }
+    if len == 4 {
+        if bool_and(bool_and(byte_at(0) == 101, byte_at(1) == 108), bool_and(byte_at(2) == 115, byte_at(3) == 101)) { return TOK_KW_ELSE; }
+        if bool_and(bool_and(byte_at(0) == 116, byte_at(1) == 114), bool_and(byte_at(2) == 117, byte_at(3) == 101)) { return TOK_KW_TRUE; }
+    }
+    if len == 5 {
+        if bool_and(bool_and(byte_at(0) == 119, byte_at(1) == 104), bool_and(byte_at(2) == 105, bool_and(byte_at(3) == 108, byte_at(4) == 101))) { return TOK_KW_WHILE; }
+        if bool_and(bool_and(byte_at(0) == 102, byte_at(1) == 97),  bool_and(byte_at(2) == 108, bool_and(byte_at(3) == 115, byte_at(4) == 101))) { return TOK_KW_FALSE; }
+    }
+    if len == 6 {
+        if bool_and(bool_and(byte_at(0) == 114, byte_at(1) == 101), bool_and(byte_at(2) == 116, bool_and(byte_at(3) == 117, bool_and(byte_at(4) == 114, byte_at(5) == 110)))) { return TOK_KW_RETURN; }
+        if bool_and(bool_and(byte_at(0) == 105, byte_at(1) == 109), bool_and(byte_at(2) == 112, bool_and(byte_at(3) == 111, bool_and(byte_at(4) == 114, byte_at(5) == 116)))) { return TOK_KW_IMPORT; }
+    }
+
+    TOK_IDENT
+}
+
+// â”€â”€ Main tokenizer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn next_token() -> i32 {
+    skip_whitespace();
+
+    if at_end() {
+        emit_token(TOK_EOF, get_pos(), 0, get_line(), get_col());
+        return TOK_EOF;
+    }
+
+    let start: i32 = get_pos();
+    let line: i32  = get_line();
+    let col: i32   = get_col();
+    let c: i32     = advance();
+
+    // Identifiers and keywords
+    if is_alpha(c) {
+        while bool_and(not(at_end()), is_alnum(current_char())) {
+            advance();
+        }
+        let len: i32 = get_pos() - start;
+        let kind: i32 = classify_ident(start, len);
+        emit_token(kind, start, len, line, col);
+        return kind;
+    }
+
+    // Integer and float literals
+    if is_digit(c) {
+        while bool_and(not(at_end()), is_digit(current_char())) {
+            advance();
+        }
+        // Check for float
+        if bool_and(not(at_end()), bool_and(current_char() == 46, is_digit(peek_char(1)))) {
+            advance(); // consume '.'
+            while bool_and(not(at_end()), is_digit(current_char())) {
+                advance();
+            }
+            let len: i32 = get_pos() - start;
+            emit_token(TOK_FLOAT, start, len, line, col);
+            return TOK_FLOAT;
+        }
+        let len: i32 = get_pos() - start;
+        emit_token(TOK_INT, start, len, line, col);
+        return TOK_INT;
+    }
+
+    // String literals
+    if c == 34 { // '"'
+        while bool_and(not(at_end()), not(current_char() == 34)) {
+            advance();
+        }
+        if not(at_end()) { advance(); } // closing '"'
+        let len: i32 = get_pos() - start;
+        emit_token(TOK_STRING, start, len, line, col);
+        return TOK_STRING;
+    }
+
+    // Operators and punctuation
+    if c == 43 { emit_token(TOK_PLUS,      start, 1, line, col); return TOK_PLUS; }
+    if c == 45 {
+        if bool_and(not(at_end()), current_char() == 62) { // '->'
+            advance();
+            emit_token(TOK_ARROW, start, 2, line, col);
+            return TOK_ARROW;
+        }
+        emit_token(TOK_MINUS, start, 1, line, col);
+        return TOK_MINUS;
+    }
+    if c == 42 { emit_token(TOK_STAR,      start, 1, line, col); return TOK_STAR; }
+    if c == 47 { emit_token(TOK_SLASH,     start, 1, line, col); return TOK_SLASH; }
+    if c == 40 { emit_token(TOK_LPAREN,    start, 1, line, col); return TOK_LPAREN; }
+    if c == 41 { emit_token(TOK_RPAREN,    start, 1, line, col); return TOK_RPAREN; }
+    if c == 123 { emit_token(TOK_LBRACE,   start, 1, line, col); return TOK_LBRACE; }
+    if c == 125 { emit_token(TOK_RBRACE,   start, 1, line, col); return TOK_RBRACE; }
+    if c == 91 { emit_token(TOK_LBRACKET,  start, 1, line, col); return TOK_LBRACKET; }
+    if c == 93 { emit_token(TOK_RBRACKET,  start, 1, line, col); return TOK_RBRACKET; }
+    if c == 44 { emit_token(TOK_COMMA,     start, 1, line, col); return TOK_COMMA; }
+    if c == 58 { emit_token(TOK_COLON,     start, 1, line, col); return TOK_COLON; }
+    if c == 59 { emit_token(TOK_SEMICOLON, start, 1, line, col); return TOK_SEMICOLON; }
+    if c == 46 { emit_token(TOK_DOT,       start, 1, line, col); return TOK_DOT; }
+    if c == 38 { emit_token(TOK_AMP,       start, 1, line, col); return TOK_AMP; }
+    if c == 124 { emit_token(TOK_PIPE,     start, 1, line, col); return TOK_PIPE; }
+    if c == 61 {
+        if bool_and(not(at_end()), current_char() == 61) { // '=='
+            advance();
+            emit_token(TOK_EQEQ, start, 2, line, col);
+            return TOK_EQEQ;
+        }
+        emit_token(TOK_EQ, start, 1, line, col);
+        return TOK_EQ;
+    }
+    if c == 33 {
+        if bool_and(not(at_end()), current_char() == 61) { // '!='
+            advance();
+            emit_token(TOK_NEQ, start, 2, line, col);
+            return TOK_NEQ;
+        }
+        emit_token(TOK_BANG, start, 1, line, col);
+        return TOK_BANG;
+    }
+    if c == 60 {
+        if bool_and(not(at_end()), current_char() == 61) { // '<='
+            advance();
+            emit_token(TOK_LE, start, 2, line, col);
+            return TOK_LE;
+        }
+        emit_token(TOK_LT, start, 1, line, col);
+        return TOK_LT;
+    }
+    if c == 62 {
+        if bool_and(not(at_end()), current_char() == 61) { // '>='
+            advance();
+            emit_token(TOK_GE, start, 2, line, col);
+            return TOK_GE;
+        }
+        emit_token(TOK_GT, start, 1, line, col);
+        return TOK_GT;
+    }
+
+    // Unknown
+    emit_token(TOK_UNKNOWN, start, 1, line, col);
+    TOK_UNKNOWN
+}
+
+// â”€â”€ Entry point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn tokenize(src_ptr: i32, src_len: i32) -> i32 {
+    // Initialize lexer state
+    mem_write_i32(SRC_PTR,   src_ptr);
+    mem_write_i32(SRC_LEN,   src_len);
+    mem_write_i32(CUR_POS,   0);
+    mem_write_i32(CUR_LINE,  1);
+    mem_write_i32(CUR_COL,   0);
+    mem_write_i32(TOK_COUNT, 0);
+
+    // Tokenize until EOF
+    while not(at_end()) {
+        let tok: i32 = next_token();
+        if tok == TOK_EOF {
+            return mem_read_i32(TOK_COUNT);
+        }
+    }
+
+    // Emit final EOF
+    next_token();
+    mem_read_i32(TOK_COUNT)
+}
+
+fn main() -> i32 {
+    // Self-test: tokenize a small SLIME snippet from memory
+    // In real use, src_ptr and src_len come from the host
+    let count: i32 = tokenize(0, 0);
+    print_i32(count);
+    0
+}

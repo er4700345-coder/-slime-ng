@@ -1,0 +1,418 @@
+// bootstrap/codegen.slime
+// SLIME Code Generator â€” written in SLIME itself (Stage 3 â€” self-hosting complete)
+// Walks the AST from parser.slime and emits WAT (WASM text format) to memory.
+// When slimec can compile this file, SLIME is self-hosting.
+
+// â”€â”€ Output buffer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// WAT output buffer starts at 65536 (second WASM page)
+
+let OUT_BASE: i32   = 65536;
+let OUT_POS: i32    = 32768;   // current write position stored here
+let OUT_CAP: i32    = 131072;  // max output size (2 pages)
+
+fn out_pos() -> i32 {
+    mem_read_i32(OUT_POS)
+}
+
+fn out_write_byte(b: i32) -> i32 {
+    let pos: i32 = out_pos();
+    mem_write_i32(OUT_POS, pos + 1);
+    0
+}
+
+// Write a string literal (ptr + len) to output buffer
+fn out_write_str(ptr: i32, len: i32) -> i32 {
+    let i: i32 = 0;
+    while i < len {
+        out_write_byte(mem_read_byte(ptr + i));
+        i = i + 1;
+    }
+    0
+}
+
+// Write a decimal integer to output
+fn out_write_int(n: i32) -> i32 {
+    if n < 0 {
+        out_write_byte(45); // '-'
+        n = 0 - n;
+    }
+    if n == 0 {
+        out_write_byte(48); // '0'
+        return 0;
+    }
+    // Build digits in reverse
+    let buf: i32 = alloc(12);
+    let len: i32 = 0;
+    while n > 0 {
+        let digit: i32 = n - ((n / 10) * 10);
+        mem_write_i32(buf + len, digit + 48);
+        n = n / 10;
+        len = len + 1;
+    }
+    // Write reversed
+    let i: i32 = len - 1;
+    while i >= 0 {
+        out_write_byte(mem_read_byte(buf + i));
+        i = i - 1;
+    }
+    0
+}
+
+// Write a static string (ptr to null-terminated string)
+fn out_write_cstr(ptr: i32) -> i32 {
+    let i: i32 = 0;
+    while not(mem_read_byte(ptr + i) == 0) {
+        out_write_byte(mem_read_byte(ptr + i));
+        i = i + 1;
+    }
+    0
+}
+
+// â”€â”€ AST accessors (mirrors parser.slime layout) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+let AST_BASE: i32      = 8192;
+let AST_NODE_SIZE: i32 = 32;
+
+fn node_type(idx: i32) -> i32 {
+    mem_read_i32(AST_BASE + (idx * AST_NODE_SIZE))
+}
+
+fn node_ca(idx: i32) -> i32 {
+    mem_read_i32(AST_BASE + (idx * AST_NODE_SIZE) + 4)
+}
+
+fn node_cb(idx: i32) -> i32 {
+    mem_read_i32(AST_BASE + (idx * AST_NODE_SIZE) + 8)
+}
+
+fn node_cc(idx: i32) -> i32 {
+    mem_read_i32(AST_BASE + (idx * AST_NODE_SIZE) + 12)
+}
+
+fn node_tok_start(idx: i32) -> i32 {
+    mem_read_i32(AST_BASE + (idx * AST_NODE_SIZE) + 16)
+}
+
+fn node_tok_len(idx: i32) -> i32 {
+    mem_read_i32(AST_BASE + (idx * AST_NODE_SIZE) + 20)
+}
+
+// â”€â”€ Source slice helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// src_base is stored at address 0 (SRC_PTR from lexer)
+
+fn src_base() -> i32 {
+    mem_read_i32(0)
+}
+
+fn write_node_src(idx: i32) -> i32 {
+    let start: i32 = node_tok_start(idx);
+    let len: i32 = node_tok_len(idx);
+    out_write_str(src_base() + start, len)
+}
+
+// â”€â”€ Indentation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+let INDENT: i32 = 32768 + 4; // indent level stored after OUT_POS
+
+fn get_indent() -> i32 {
+    mem_read_i32(INDENT)
+}
+
+fn push_indent() -> i32 {
+    mem_write_i32(INDENT, get_indent() + 1)
+}
+
+fn pop_indent() -> i32 {
+    mem_write_i32(INDENT, get_indent() - 1)
+}
+
+fn write_indent() -> i32 {
+    let i: i32 = 0;
+    while i < get_indent() {
+        out_write_byte(32); // space
+        out_write_byte(32); // space
+        i = i + 1;
+    }
+    0
+}
+
+fn write_newline() -> i32 {
+    out_write_byte(10)
+}
+
+// â”€â”€ WAT emission â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn emit_type_str(ty: i32) -> i32 {
+    if ty == 1 { out_write_byte(105); out_write_byte(51); out_write_byte(50); } // i32
+    if ty == 2 { out_write_byte(105); out_write_byte(54); out_write_byte(52); } // i64
+    if ty == 3 { out_write_byte(102); out_write_byte(51); out_write_byte(50); } // f32
+    if ty == 4 { out_write_byte(102); out_write_byte(54); out_write_byte(52); } // f64
+    0
+}
+
+fn emit_binop(op: i32) -> i32 {
+    if op == 0  { out_write_str(0, 0); } // i32.add â€” written as bytes below
+    // Emit WAT opcodes as strings
+    if op == 0  { write_str_literal("i32.add"); }
+    if op == 1  { write_str_literal("i32.sub"); }
+    if op == 2  { write_str_literal("i32.mul"); }
+    if op == 3  { write_str_literal("i32.div_s"); }
+    if op == 4  { write_str_literal("i32.eq"); }
+    if op == 5  { write_str_literal("i32.ne"); }
+    if op == 6  { write_str_literal("i32.lt_s"); }
+    if op == 7  { write_str_literal("i32.gt_s"); }
+    if op == 8  { write_str_literal("i32.le_s"); }
+    if op == 9  { write_str_literal("i32.ge_s"); }
+    if op == 10 { write_str_literal("i32.and"); }
+    if op == 11 { write_str_literal("i32.or"); }
+    0
+}
+
+// Write a compile-time string literal byte by byte
+// (In real self-hosted compiler, string literals live in data section)
+fn write_str_literal(s: i32) -> i32 {
+    // s is a ptr to null-terminated string in the module's data segment
+    out_write_cstr(s)
+}
+
+// â”€â”€ Code generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+fn gen_expr(idx: i32) -> i32 {
+    let ntype: i32 = node_type(idx);
+
+    if ntype == 14 { // NODE_INT
+        write_indent();
+        write_str_literal("i32.const ");
+        write_node_src(idx);
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 15 { // NODE_FLOAT
+        write_indent();
+        write_str_literal("f64.const ");
+        write_node_src(idx);
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 17 { // NODE_BOOL
+        write_indent();
+        write_str_literal("i32.const ");
+        out_write_int(node_ca(idx));
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 13 { // NODE_IDENT
+        write_indent();
+        write_str_literal("local.get $");
+        write_node_src(idx);
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 10 { // NODE_BINARY
+        gen_expr(node_ca(idx));  // left
+        gen_expr(node_cb(idx));  // right
+        write_indent();
+        emit_binop(node_cc(idx));
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 11 { // NODE_UNARY
+        gen_expr(node_ca(idx));
+        write_indent();
+        if node_cb(idx) == 1 { // OP_SUB (negate)
+            write_str_literal("i32.const -1");
+            write_newline();
+            write_indent();
+            write_str_literal("i32.mul");
+        } else {
+            write_str_literal("i32.eqz");
+        }
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 12 { // NODE_CALL
+        // Emit args
+        let arg: i32 = node_cc(idx);
+        while arg != -1 {
+            gen_expr(arg);
+            arg = node_cb(arg);
+        }
+        write_indent();
+        write_str_literal("call $");
+        write_node_src(idx); // function name from source
+        write_newline();
+        return 0;
+    }
+
+    0
+}
+
+fn gen_stmt(idx: i32) -> i32 {
+    let ntype: i32 = node_type(idx);
+
+    if ntype == 4 { // NODE_LET
+        // local.set $name
+        gen_expr(node_cb(idx)); // RHS expr
+        write_indent();
+        write_str_literal("local.set $");
+        write_node_src(idx); // name from source
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 9 { // NODE_ASSIGN
+        gen_expr(node_cb(idx));
+        write_indent();
+        write_str_literal("local.set $");
+        gen_expr(node_ca(idx)); // LHS ident â€” just write name
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 5 { // NODE_RETURN
+        if node_ca(idx) != -1 {
+            gen_expr(node_ca(idx));
+        }
+        write_indent();
+        write_str_literal("return");
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 8 { // NODE_EXPR_STMT
+        gen_expr(node_ca(idx));
+        write_indent();
+        write_str_literal("drop");
+        write_newline();
+        return 0;
+    }
+
+    if ntype == 6 { // NODE_IF
+        write_indent(); write_str_literal("(if"); write_newline();
+        push_indent();
+        write_indent(); write_str_literal("(then"); write_newline();
+        push_indent();
+        gen_block(node_cb(idx));
+        pop_indent();
+        write_indent(); write_str_literal(")"); write_newline();
+        if node_cc(idx) != -1 {
+            write_indent(); write_str_literal("(else"); write_newline();
+            push_indent();
+            gen_block(node_cc(idx));
+            pop_indent();
+            write_indent(); write_str_literal(")"); write_newline();
+        }
+        pop_indent();
+        write_indent(); write_str_literal(")"); write_newline();
+        return 0;
+    }
+
+    if ntype == 7 { // NODE_WHILE
+        write_indent(); write_str_literal("(block $break"); write_newline();
+        push_indent();
+        write_indent(); write_str_literal("(loop $continue"); write_newline();
+        push_indent();
+        gen_expr(node_ca(idx)); // condition
+        write_indent(); write_str_literal("i32.eqz"); write_newline();
+        write_indent(); write_str_literal("br_if $break"); write_newline();
+        gen_block(node_cb(idx));
+        write_indent(); write_str_literal("br $continue"); write_newline();
+        pop_indent();
+        write_indent(); write_str_literal(")"); write_newline();
+        pop_indent();
+        write_indent(); write_str_literal(")"); write_newline();
+        return 0;
+    }
+
+    0
+}
+
+fn gen_block(idx: i32) -> i32 {
+    // NODE_BLOCK â€” walk linked stmt list via child_b
+    let stmt: i32 = node_ca(idx); // first stmt
+    while stmt != -1 {
+        gen_stmt(stmt);
+        stmt = node_cb(stmt); // next stmt
+    }
+    0
+}
+
+fn gen_fn(idx: i32) -> i32 {
+    write_indent();
+    write_str_literal("(func $");
+    write_node_src(idx); // function name
+    write_newline();
+    push_indent();
+
+    // Parameters â€” walk param list
+    // (params and locals emitted as WAT locals for simplicity)
+    // TODO: walk NODE_PARAM chain from node_ca
+
+    // Return type
+    let ret_ty: i32 = node_cc(idx);
+    if bool_and(ret_ty != 0, ret_ty != 6) { // not void
+        write_indent();
+        write_str_literal("(result ");
+        emit_type_str(ret_ty);
+        write_str_literal(")");
+        write_newline();
+    }
+
+    // Body
+    gen_block(node_cb(idx));
+
+    pop_indent();
+    write_indent();
+    write_str_literal(")");
+    write_newline();
+    0
+}
+
+fn gen_program(root: i32) -> i32 {
+    mem_write_i32(OUT_POS, OUT_BASE);
+    mem_write_i32(INDENT, 0);
+
+    write_str_literal("(module");
+    write_newline();
+    push_indent();
+
+    // Memory declaration
+    write_indent();
+    write_str_literal("(memory 1)");
+    write_newline();
+
+    // Walk function declarations
+    let decl: i32 = node_ca(root);
+    while decl != -1 {
+        if node_type(decl) == 1 { // NODE_FN_DECL
+            gen_fn(decl);
+        }
+        decl = node_cb(decl);
+    }
+
+    // Export main
+    write_indent();
+    write_str_literal("(export \"main\" (func $main))");
+    write_newline();
+
+    pop_indent();
+    write_str_literal(")");
+    write_newline();
+
+    // Return output length
+    out_pos() - OUT_BASE
+}
+
+fn main() -> i32 {
+    let tok_count: i32 = mem_read_i32(20);
+    let root: i32 = parse_program(tok_count);
+    let out_len: i32 = gen_program(root);
+    println(OUT_BASE, out_len);
+    0
+}

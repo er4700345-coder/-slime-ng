@@ -15,11 +15,12 @@ name = "slime"
 path = "src/lib.rs"
 
 [dependencies]
-cranelift            = "0.110"
-cranelift-module     = "0.110"
-cranelift-object     = "0.110"
-cranelift-native     = "0.110"
-target-lexicon       = "0.12"
+cranelift          = "0.110"
+cranelift-module   = "0.110"
+cranelift-object   = "0.110"
+cranelift-native   = "0.110"
+target-lexicon     = "0.12"
+walrus             = "0.20"
 
 [profile.release]
 opt-level = 3

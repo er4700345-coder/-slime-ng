@@ -33,7 +33,7 @@ pub enum Stmt {
     Block(Vec<Stmt>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     I32, I64, F32, F64, Bool, String, Void,
     Func(Vec<Type>, Box<Type>),

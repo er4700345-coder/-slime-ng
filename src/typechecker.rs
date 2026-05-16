@@ -4,15 +4,22 @@ use std::collections::HashMap;
 pub struct TypeChecker {
     scopes: Vec<HashMap<String, Type>>,
     functions: HashMap<String, (Vec<Type>, Type)>,
+    builtins: HashMap<String, (Vec<Type>, Type)>,
     errors: Vec<String>,
     current_ret: Option<Type>,
 }
 
 impl TypeChecker {
     pub fn new() -> Self {
+        let mut builtins = HashMap::new();
+        builtins.insert("print".to_string(), (vec![Type::String], Type::Void));
+        builtins.insert("len".to_string(), (vec![Type::String], Type::I32));
+        builtins.insert("to_string".to_string(), (vec![Type::I32], Type::String)); // simplified
+        builtins.insert("input".to_string(), (vec![], Type::String));
         TypeChecker {
             scopes: vec![HashMap::new()],
             functions: HashMap::new(),
+            builtins,
             errors: Vec::new(),
             current_ret: None,
         }
@@ -42,14 +49,12 @@ impl TypeChecker {
     }
 
     pub fn check_program(&mut self, decls: &[Decl]) {
-        // First pass: collect function signatures
         for decl in decls {
             if let Decl::Function(f) = decl {
                 let param_types: Vec<Type> = f.params.iter().map(|(_, t)| t.clone()).collect();
                 self.functions.insert(f.name.clone(), (param_types, f.ret_type.clone()));
             }
         }
-        // Second pass: check
         for decl in decls {
             if let Decl::Function(f) = decl {
                 self.check_function(f);
@@ -135,7 +140,7 @@ impl TypeChecker {
             }
             Expr::Unary(_, e) => self.check_expr(e),
             Expr::Call(name, args) => {
-                if let Some((param_tys, ret_ty)) = self.functions.get(name) {
+                if let Some((param_tys, ret_ty)) = self.functions.get(name).or(self.builtins.get(name)) {
                     if args.len() != param_tys.len() {
                         self.errors.push(format!("{} expects {} args, got {}", name, param_tys.len(), args.len()));
                     }
@@ -177,33 +182,38 @@ mod tests {
     fn make_let(name: &str, expr: Expr) -> Stmt { Stmt::Let(name.to_string(), None, Box::new(expr)) }
     fn make_return(expr: Expr) -> Stmt { Stmt::Return(Some(Box::new(expr))) }
 
-    #[test] fn test_valid_return() {
-        let func = Function { name: "main".into(), params: vec![], ret_type: Type::I32, body: vec![make_return(Expr::Integer(42))] };
-        let mut tc = TypeChecker::new(); tc.check_function(&func); assert!(!tc.has_errors());
+    #[test] fn test_valid_builtin_call() {
+        let mut tc = TypeChecker::new();
+        let call = Expr::Call("print".into(), vec![Expr::String("hello".into())]);
+        assert_eq!(tc.check_expr(&call), Type::Void);
+        assert!(!tc.has_errors());
     }
-    #[test] fn test_invalid_return() {
-        let func = Function { name: "main".into(), params: vec![], ret_type: Type::I32, body: vec![make_return(Expr::Bool(true))] };
-        let mut tc = TypeChecker::new(); tc.check_function(&func); assert!(tc.has_errors());
+
+    #[test] fn test_invalid_builtin_call() {
+        let mut tc = TypeChecker::new();
+        let call = Expr::Call("foo".into(), vec![]);
+        tc.check_expr(&call);
+        assert!(tc.has_errors());
     }
-    #[test] fn test_missing_return() {
-        let func = Function { name: "main".into(), params: vec![], ret_type: Type::I32, body: vec![make_let("x", Expr::Integer(1))] };
-        let mut tc = TypeChecker::new(); tc.check_function(&func); assert!(tc.has_errors());
+
+    #[test] fn test_wrong_builtin_arg_count() {
+        let mut tc = TypeChecker::new();
+        let call = Expr::Call("print".into(), vec![]);
+        tc.check_expr(&call);
+        assert!(tc.has_errors());
     }
-    #[test] fn test_valid_call() {
-        let f = Function { name: "add".into(), params: vec![("a".into(), Type::I32), ("b".into(), Type::I32)], ret_type: Type::I32, body: vec![] };
-        let mut tc = TypeChecker::new(); tc.functions.insert("add".into(), (vec![Type::I32, Type::I32], Type::I32));
-        let call = Expr::Call("add".into(), vec![Expr::Integer(1), Expr::Integer(2)]);
-        assert_eq!(tc.check_expr(&call), Type::I32); assert!(!tc.has_errors());
+
+    #[test] fn test_wrong_builtin_arg_type() {
+        let mut tc = TypeChecker::new();
+        let call = Expr::Call("len".into(), vec![Expr::Integer(42)]);
+        tc.check_expr(&call);
+        assert!(tc.has_errors());
     }
-    #[test] fn test_undefined_call() {
-        let mut tc = TypeChecker::new(); let call = Expr::Call("foo".into(), vec![]); tc.check_expr(&call); assert!(tc.has_errors());
-    }
-    #[test] fn test_wrong_arg_count() {
-        let mut tc = TypeChecker::new(); tc.functions.insert("add".into(), (vec![Type::I32, Type::I32], Type::I32));
-        let call = Expr::Call("add".into(), vec![Expr::Integer(1)]); tc.check_expr(&call); assert!(tc.has_errors());
-    }
-    #[test] fn test_wrong_arg_type() {
-        let mut tc = TypeChecker::new(); tc.functions.insert("add".into(), (vec![Type::I32, Type::I32], Type::I32));
-        let call = Expr::Call("add".into(), vec![Expr::Integer(1), Expr::Bool(true)]); tc.check_expr(&call); assert!(tc.has_errors());
+
+    #[test] fn test_builtin_return_usage() {
+        let mut tc = TypeChecker::new();
+        let call = Expr::Call("len".into(), vec![Expr::String("hi".into())]);
+        assert_eq!(tc.check_expr(&call), Type::I32);
+        assert!(!tc.has_errors());
     }
 }

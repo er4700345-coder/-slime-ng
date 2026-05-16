@@ -1,0 +1,6 @@
+fn main() {
+  print("Hello from SLIME");
+  let len_val: i32 = len("test");
+  let s: string = to_string(42);
+  return 0;
+}

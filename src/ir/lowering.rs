@@ -139,3 +139,68 @@ impl LoweringContext {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Expr, Stmt, Function as AstFunction, Type as AstType};
+
+    fn make_simple_function() -> AstFunction {
+        AstFunction {
+            name: "main".to_string(),
+            params: vec![],
+            ret_type: Some("i32".to_string()),
+            body: vec![Stmt::Return(Some(Box::new(Expr::Integer(42))))],
+        }
+    }
+
+    #[test]
+    fn test_lowering_valid_function() {
+        let mut ctx = LoweringContext::new();
+        let func = make_simple_function();
+        let ir_func = ctx.lower_function(&func);
+        assert_eq!(ir_func.name, "main");
+        assert!(!ir_func.blocks.is_empty());
+    }
+
+    #[test]
+    fn test_lowering_return() {
+        let mut ctx = LoweringContext::new();
+        let func = make_simple_function();
+        let ir_func = ctx.lower_function(&func);
+        let has_return = ir_func.blocks[0].instructions.iter().any(|i| matches!(i, Instruction::Return(_)));
+        assert!(has_return);
+    }
+
+    #[test]
+    fn test_lowering_binary() {
+        let mut ctx = LoweringContext::new();
+        let func = AstFunction {
+            name: "add".to_string(),
+            params: vec![("a".to_string(), "i32".to_string()), ("b".to_string(), "i32".to_string())],
+            ret_type: Some("i32".to_string()),
+            body: vec![Stmt::Return(Some(Box::new(Expr::Binary(
+                Box::new(Expr::Identifier("a".to_string())),
+                "+".to_string(),
+                Box::new(Expr::Identifier("b".to_string())),
+            ))))],
+        };
+        let ir_func = ctx.lower_function(&func);
+        let has_binary = ir_func.blocks[0].instructions.iter().any(|i| matches!(i, Instruction::Binary { .. }));
+        assert!(has_binary);
+    }
+
+    #[test]
+    fn test_lowering_builtin_call() {
+        let mut ctx = LoweringContext::new();
+        let func = AstFunction {
+            name: "main".to_string(),
+            params: vec![],
+            ret_type: Some("void".to_string()),
+            body: vec![Stmt::Expr(Box::new(Expr::Call("print".to_string(), vec![Box::new(Expr::String("hi".to_string()))])))],
+        };
+        let ir_func = ctx.lower_function(&func);
+        let has_call = ir_func.blocks[0].instructions.iter().any(|i| matches!(i, Instruction::Call { name, .. } if name == "print"));
+        assert!(has_call);
+    }
+}

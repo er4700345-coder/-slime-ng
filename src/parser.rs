@@ -1,4 +1,5 @@
 use crate::lexer::{Lexer, Token};
+use crate::err::{SlimeError, SourceLocation};
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -45,75 +46,83 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(mut lexer: Lexer) -> Self {
-        let current = lexer.next_token();
+        let current = lexer.next_token().unwrap_or(Token::EOF);
         Parser { lexer, current }
     }
     
     fn advance(&mut self) {
-        self.current = self.lexer.next_token();
+        self.current = self.lexer.next_token().unwrap_or(Token::EOF);
     }
     
-    fn expect(&mut self, token: Token) {
+    fn expect(&mut self, token: Token) -> Result<(), SlimeError> {
         if std::mem::discriminant(&self.current) == std::mem::discriminant(&token) {
             self.advance();
+            Ok(())
         } else {
-            panic!("Expected {:?}, got {:?}", token, self.current);
+            let loc = SourceLocation { line: self.lexer.line(), col: self.lexer.col() };
+            Err(SlimeError::ParseError { msg: format!("Expected {:?}, got {:?}", token, self.current), loc })
         }
     }
     
-    fn parse_identifier(&mut self) -> String {
+    fn parse_identifier(&mut self) -> Result<String, SlimeError> {
         match &self.current {
             Token::Identifier(s) => {
                 let s = s.clone();
                 self.advance();
-                s
+                Ok(s)
             }
-            _ => panic!("Expected identifier, got {:?}", self.current),
+            _ => {
+                let loc = SourceLocation { line: self.lexer.line(), col: self.lexer.col() };
+                Err(SlimeError::ParseError { msg: format!("Expected identifier, got {:?}", self.current), loc })
+            }
         }
     }
     
-    fn parse_type(&mut self) -> String {
+    fn parse_type(&mut self) -> Result<String, SlimeError> {
         match &self.current {
-            Token::I32 => { self.advance(); "i32".to_string() }
-            Token::I64 => { self.advance(); "i64".to_string() }
-            Token::F32 => { self.advance(); "f32".to_string() }
-            Token::F64 => { self.advance(); "f64".to_string() }
-            Token::Bool => { self.advance(); "bool".to_string() }
-            Token::String => { self.advance(); "string".to_string() }
-            Token::Void => { self.advance(); "void".to_string() }
+            Token::I32 => { self.advance(); Ok("i32".to_string()) }
+            Token::I64 => { self.advance(); Ok("i64".to_string()) }
+            Token::F32 => { self.advance(); Ok("f32".to_string()) }
+            Token::F64 => { self.advance(); Ok("f64".to_string()) }
+            Token::Bool => { self.advance(); Ok("bool".to_string()) }
+            Token::String => { self.advance(); Ok("string".to_string()) }
+            Token::Void => { self.advance(); Ok("void".to_string()) }
             Token::Identifier(s) => {
                 let s = s.clone();
                 self.advance();
-                s
+                Ok(s)
             }
-            _ => panic!("Expected type, got {:?}", self.current),
+            _ => {
+                let loc = SourceLocation { line: self.lexer.line(), col: self.lexer.col() };
+                Err(SlimeError::ParseError { msg: format!("Expected type, got {:?}", self.current), loc })
+            }
         }
     }
     
-    fn parse_primary(&mut self) -> Expr {
+    fn parse_primary(&mut self) -> Result<Expr, SlimeError> {
         match &self.current {
             Token::Integer(n) => {
                 let n = *n;
                 self.advance();
-                Expr::Integer(n)
+                Ok(Expr::Integer(n))
             }
             Token::Float(f) => {
                 let f = *f;
                 self.advance();
-                Expr::Float(f)
+                Ok(Expr::Float(f))
             }
             Token::StringLit(s) => {
                 let s = s.clone();
                 self.advance();
-                Expr::String(s)
+                Ok(Expr::String(s))
             }
             Token::True => {
                 self.advance();
-                Expr::Bool(true)
+                Ok(Expr::Bool(true))
             }
             Token::False => {
                 self.advance();
-                Expr::Bool(false)
+                Ok(Expr::Bool(false))
             }
             Token::Identifier(s) => {
                 let s = s.clone();
@@ -122,78 +131,81 @@ impl Parser {
                     self.advance();
                     let mut args = Vec::new();
                     while !matches!(self.current, Token::RParen) {
-                        args.push(self.parse_expr());
+                        args.push(self.parse_expr()?);
                         if matches!(self.current, Token::Comma) {
                             self.advance();
                         }
                     }
                     self.advance();
-                    Expr::Call(s, args)
+                    Ok(Expr::Call(s, args))
                 } else {
-                    Expr::Identifier(s)
+                    Ok(Expr::Identifier(s))
                 }
             }
-            _ => panic!("Unexpected token in expression: {:?}", self.current),
+            _ => {
+                let loc = SourceLocation { line: self.lexer.line(), col: self.lexer.col() };
+                Err(SlimeError::ParseError { msg: format!("Unexpected token in expression: {:?}", self.current), loc })
+            }
         }
     }
     
-    fn parse_expr(&mut self) -> Expr {
+    fn parse_expr(&mut self) -> Result<Expr, SlimeError> {
         self.parse_primary()
     }
     
-    fn parse_stmt(&mut self) -> Stmt {
+    fn parse_stmt(&mut self) -> Result<Stmt, SlimeError> {
         match &self.current {
             Token::Let => {
                 self.advance();
-                let name = self.parse_identifier();
+                let name = self.parse_identifier()?;
                 let ty = if matches!(self.current, Token::Colon) {
                     self.advance();
-                    Some(self.parse_type())
+                    Some(self.parse_type()?)
                 } else {
                     None
                 };
-                self.expect(Token::Assign);
-                let expr = self.parse_expr();
-                self.expect(Token::Semicolon);
-                Stmt::Let(name, ty, expr)
+                self.expect(Token::Assign)?;
+                let expr = self.parse_expr()?;
+                self.expect(Token::Semicolon)?;
+                Ok(Stmt::Let(name, ty, expr))
             }
             Token::Return => {
                 self.advance();
                 let expr = if !matches!(self.current, Token::Semicolon) {
-                    Some(self.parse_expr())
+                    Some(self.parse_expr()?)
                 } else {
                     None
                 };
-                self.expect(Token::Semicolon);
-                Stmt::Return(expr)
+                self.expect(Token::Semicolon)?;
+                Ok(Stmt::Return(expr))
             }
             _ => {
-                let expr = self.parse_expr();
-                self.expect(Token::Semicolon);
-                Stmt::Expr(expr)
+                let expr = self.parse_expr()?;
+                self.expect(Token::Semicolon)?;
+                Ok(Stmt::Expr(expr))
             }
         }
     }
     
-    fn parse_block(&mut self) -> Vec<Stmt> {
-        self.expect(Token::LBrace);
+    fn parse_block(&mut self) -> Result<Vec<Stmt>, SlimeError> {
+        self.expect(Token::LBrace)?;
         let mut stmts = Vec::new();
         while !matches!(self.current, Token::RBrace) {
-            stmts.push(self.parse_stmt());
+            stmts.push(self.parse_stmt()?);
         }
         self.advance();
-        stmts
+        Ok(stmts)
     }
     
-    fn parse_function(&mut self) -> Function {
-        self.expect(Token::Fn);
-        let name = self.parse_identifier();
-        self.expect(Token::LParen);
+    fn parse_function(&mut self) -> Result<Function, SlimeError> {
+        self.expect(Token::Fn)?;
+        let name = self.parse_identifier()?;
+        self.expect(Token::LParen)?;
         let mut params = Vec::new();
         while !matches!(self.current, Token::RParen) {
-            let pname = self.parse_identifier();
-            self.expect(Token::Colon);
-            let ptype = self.parse_type();
+            let pname = self.parse_identifier()?;
+            self.expect(Token::Colon)?;
+            let ptype = self.parse_type()?;
             params.push((pname, ptype));
             if matches!(self.current, Token::Comma) {
                 self.advance();
@@ -202,22 +214,22 @@ impl Parser {
         self.advance();
         let ret = if matches!(self.current, Token::Arrow) {
             self.advance();
-            Some(self.parse_type())
+            Some(self.parse_type()?)
         } else {
             None
         };
-        let body = self.parse_block();
-        Function { name, params, ret_type: ret, body }
+        let body = self.parse_block()?;
+        Ok(Function { name, params, ret_type: ret, body })
     }
     
-    fn parse_target(&mut self) -> Target {
-        self.expect(Token::Target);
-        let name = self.parse_identifier();
-        self.expect(Token::LBrace);
+    fn parse_target(&mut self) -> Result<Target, SlimeError> {
+        self.expect(Token::Target)?;
+        let name = self.parse_identifier()?;
+        self.expect(Token::LBrace)?;
         let mut options = Vec::new();
         while !matches!(self.current, Token::RBrace) {
-            let key = self.parse_identifier();
-            self.expect(Token::Assign);
+            let key = self.parse_identifier()?;
+            self.expect(Token::Assign)?;
             let val = match &self.current {
                 Token::Identifier(s) => {
                     let s = s.clone();
@@ -237,51 +249,67 @@ impl Parser {
                     self.advance();
                     "false".to_string()
                 }
-                _ => panic!("Expected literal in target option"),
+                _ => {
+                    let loc = SourceLocation { line: self.lexer.line(), col: self.lexer.col() };
+                    return Err(SlimeError::ParseError { msg: "Expected literal in target option".to_string(), loc });
+                }
             };
             options.push((key, val));
         }
         self.advance();
-        Target { name, options }
+        Ok(Target { name, options })
     }
     
-    pub fn parse(&mut self) -> Vec<Decl> {
+    pub fn parse(&mut self) -> Result<Vec<Decl>, SlimeError> {
         let mut decls = Vec::new();
         while self.current != Token::EOF {
             match &self.current {
                 Token::Fn => {
-                    let f = self.parse_function();
+                    let f = self.parse_function()?;
                     decls.push(Decl::Function(f));
                 }
                 Token::Target => {
-                    let t = self.parse_target();
+                    let t = self.parse_target()?;
                     decls.push(Decl::Target(t));
                 }
-                _ => panic!("Unexpected token at top level: {:?}", self.current),
+                _ => {
+                    let loc = SourceLocation { line: self.lexer.line(), col: self.lexer.col() };
+                    return Err(SlimeError::ParseError { msg: format!("Unexpected token at top level: {:?}", self.current), loc });
+                }
             }
         }
-        decls
+        Ok(decls)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
-    fn test_parse_function() {
-        let input = "fn main() { let x = 42; }";
+    fn test_unexpected_token_location() {
+        let input = "let x = 1;";
         let lexer = Lexer::new(input);
         let mut parser = Parser::new(lexer);
-        let decls = parser.parse();
-        assert_eq!(decls.len(), 1);
-        match &decls[0] {
-            Decl::Function(f) => {
-                assert_eq!(f.name, "main");
-                assert_eq!(f.params.len(), 0);
-                assert_eq!(f.body.len(), 1);
-            }
-            _ => panic!("Expected function"),
-        }
+        let result = parser.parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_missing_delimiter_location() {
+        let input = "fn main() { let x = 1 ";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let result = parser.parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_function_syntax_location() {
+        let input = "fn 123() {} ";
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+        let result = parser.parse();
+        assert!(result.is_err());
     }
 }

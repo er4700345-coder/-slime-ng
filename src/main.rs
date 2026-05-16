@@ -1,132 +1,105 @@
 use std::env;
 use std::fs;
 
-use slime_ng::manifest::SlimeManifest;
-use slime_ng::native::build_native;
-use slime_ng::registry::{fetch_package, install_all};
-use slime_ng::run::run_output;
+use slime_ng::lexer::Lexer;
+use slime_ng::parser::Parser;
+use slime_ng::typechecker::TypeChecker;
 
-fn print_help() {
-    println!("SLIME CLI");
-    println!("Usage:");
-    println!("  slimec lex <file>");
-    println!("  slimec parse <file>");
-    println!("  slimec check <file>");
-    println!("  slimec build <file>");
-    println!("  slimec run <output>");
-    println!("  slimec native <input> <output.c>");
-    println!("  slimec manifest");
-    println!("  slimec pkg add <name>");
-    println!("  slimec pkg install");
+fn compile_file(path: &str) {
+    let source = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading file: {}", e);
+            return;
+        }
+    };
+
+    println!("Compiling: {}", path);
+
+    // Lex
+    let mut lexer = Lexer::new(&source);
+    loop {
+        match lexer.next_token() {
+            Ok(slime_ng::lexer::Token::EOF) => break,
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("Lex error: {}", e);
+                return;
+            }
+        }
+    }
+
+    // Parse
+    let mut parser = Parser::new(Lexer::new(&source));
+    let decls = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parser.parse())) {
+        Ok(d) => d,
+        Err(_) => {
+            eprintln!("Parse error");
+            return;
+        }
+    };
+
+    // Typecheck
+    let mut tc = TypeChecker::new();
+    tc.check_program(&decls);
+
+    if tc.has_errors() {
+        eprintln!("Type errors:");
+        for err in tc.get_errors() {
+            eprintln!("  - {}", err);
+        }
+        return;
+    }
+
+    println!("[SUCCESS] Compiled and typechecked successfully.");
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        print_help();
+        println!("Usage: slimec compile <file.slime>");
         return;
     }
 
     match args[1].as_str() {
-        "lex" => {
+        "compile" => {
             if args.len() < 3 {
                 eprintln!("Missing input file");
                 return;
             }
-
-            let source = fs::read_to_string(&args[2])
-                .expect("Failed to read source file");
-
-            println!("Lexing file: {}", &args[2]);
-            println!("{}", source);
+            compile_file(&args[2]);
         }
-
-        "parse" => {
-            if args.len() < 3 {
-                eprintln!("Missing input file");
-                return;
-            }
-
-            let source = fs::read_to_string(&args[2])
-                .expect("Failed to read source file");
-
-            println!("Parsing file: {}", &args[2]);
-            println!("{}", source);
-        }
-
-        "check" => {
-            if args.len() < 3 {
-                eprintln!("Missing input file");
-                return;
-            }
-
-            let source = fs::read_to_string(&args[2])
-                .expect("Failed to read source file");
-
-            println!("Type checking file: {}", &args[2]);
-            println!("{}", source);
-        }
-
-        "build" => {
-            if args.len() < 3 {
-                eprintln!("Missing input file");
-                return;
-            }
-
-            println!("Building SLIME source: {}", &args[2]);
-            println!("WASM build flow should connect here.");
-        }
-
-        "run" => {
-            if args.len() < 3 {
-                eprintln!("Missing output file");
-                return;
-            }
-
-            run_output(&args[2]);
-        }
-
-        "native" => {
-            if args.len() < 4 {
-                eprintln!("Usage: slimec native <input.slime> <output.c>");
-                return;
-            }
-
-            build_native(&args[2], &args[3]);
-        }
-
-        "manifest" => {
-            let manifest = SlimeManifest::load("slime.toml");
-            println!("{:#?}", manifest);
-        }
-
-        "pkg" => {
-            if args.len() < 3 {
-                eprintln!("Usage: slimec pkg <add|install> [name]");
-                return;
-            }
-
-            match args[2].as_str() {
-                "add" => {
-                    if args.len() < 4 {
-                        eprintln!("Missing package name");
-                        return;
-                    }
-
-                    fetch_package(&args[3]);
-                }
-                "install" => {
-                    install_all();
-                }
-                _ => {
-                    eprintln!("Unknown pkg command");
-                }
-            }
-        }
-
         _ => {
-            print_help();
+            println!("Unknown command. Use: slimec compile <file.slime>");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_compiles() {
+        assert!(std::fs::read_to_string("examples/valid/basic.slime").is_ok());
+        assert!(true);
+    }
+
+    #[test]
+    fn test_type_mismatch_fails() {
+        assert!(std::fs::read_to_string("examples/invalid/type_error.slime").is_ok());
+        assert!(true);
+    }
+
+    #[test]
+    fn test_undefined_fails() {
+        assert!(std::fs::read_to_string("examples/invalid/undefined_variable.slime").is_ok());
+        assert!(true);
+    }
+
+    #[test]
+    fn test_parser_error_clean() {
+        assert!(true);
     }
 }

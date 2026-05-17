@@ -67,3 +67,43 @@ slime/
 ├── Cargo.toml / package config
 ├── README.md
 └── LICENSE
+Most languages are trapped.
+
+Some are good for web.
+Some are good for backend.
+Some are good for low-level systems.
+
+Very few are built to dominate all layers.
+
+SLIME is designed to erase those boundaries.
+
+MISSION:
+One language. Everywhere.
+
+From frontend execution
+to kernel-level systems.
+
+GOALS:
+- High-level developer ergonomics
+- Low-level execution control
+- Strong type guarantees
+- Portable compilation targets
+- Runtime flexibility
+- Systems-grade performance
+
+ARCHITECTURE MINDSET:
+Explicit > Magical
+
+Control > Convenience
+
+Performance > Abstraction
+
+Systems Ownership > Hidden Runtime Costs
+
+PORTABILITY TARGET:
+Browser → OS → Embedded → Server → Bare Metal
+
+PHILOSOPHY:
+Rust × Zig × TypeScript × WebAssembly × Controlled Chaos
+
+But built with an original systems-first doctrine.

@@ -1,0 +1,6 @@
+import "math";
+
+fn main() {
+  let x: i32 = add(1, 2);
+  return x;
+}

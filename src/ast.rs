@@ -65,5 +65,11 @@ pub enum Literal {
 pub enum Decl {
     Function(Function),
     Target(Target),
-    Import(String),
+    Import(Import),
+}
+
+#[derive(Debug, Clone)]
+pub struct Import {
+    pub path: String,
+    pub alias: Option<String>,
 }

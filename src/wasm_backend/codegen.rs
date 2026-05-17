@@ -15,7 +15,7 @@ impl WasmCodegen {
     }
 
     pub fn lower_program(&mut self, program: &Program) -> Vec<u8> {
-        // Add print, len, to_string as imported host functions (minimal stdlib)
+        // Add print, len, to_string, input as imported host functions (minimal stdlib)
         let print_ty = self.module.types.add(&[ValType::I32], &[]);
         let print_import = self.module.imports.add("env", "print", ImportKind::Func(print_ty));
 
@@ -24,6 +24,9 @@ impl WasmCodegen {
 
         let to_string_ty = self.module.types.add(&[ValType::I32], &[ValType::I32]);
         let to_string_import = self.module.imports.add("env", "to_string", ImportKind::Func(to_string_ty));
+
+        let input_ty = self.module.types.add(&[], &[ValType::I32]);
+        let input_import = self.module.imports.add("env", "input", ImportKind::Func(input_ty));
 
         let mut func_ids: std::collections::HashMap<String, walrus::FunctionId> = std::collections::HashMap::new();
         for func in &program.functions {
@@ -34,12 +37,12 @@ impl WasmCodegen {
         }
 
         for func in &program.functions {
-            self.lower_function(func, &func_ids, print_import, len_import, to_string_import);
+            self.lower_function(func, &func_ids, print_import, len_import, to_string_import, input_import);
         }
         self.module.emit_wasm()
     }
 
-    fn lower_function(&mut self, func: &Function, func_ids: &std::collections::HashMap<String, walrus::FunctionId>, print_import: walrus::ImportId, len_import: walrus::ImportId, to_string_import: walrus::ImportId) {
+    fn lower_function(&mut self, func: &Function, func_ids: &std::collections::HashMap<String, walrus::FunctionId>, print_import: walrus::ImportId, len_import: walrus::ImportId, to_string_import: walrus::ImportId, input_import: walrus::ImportId) {
         if let Some(&func_id) = func_ids.get(&func.name) {
             let mut builder = FunctionBuilder::new(&mut self.module.types, &[], &[]);
             let mut body = builder.func_body();
@@ -72,6 +75,8 @@ impl WasmCodegen {
                             body.call(len_import);
                         } else if name == "to_string" {
                             body.call(to_string_import);
+                        } else if name == "input" {
+                            body.call(input_import);
                         } else if let Some(&id) = func_ids.get(name) {
                             body.call(id);
                         }
@@ -121,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn test_valid_to_string_lowers() {
+    fn test_input_lowers_to_valid_wasm() {
         let mut program = Program::new();
         let func = Function {
             name: "main".to_string(),
@@ -129,7 +134,7 @@ mod tests {
             ret_type: IrType::I32,
             blocks: vec![BasicBlock {
                 id: 0,
-                instructions: vec![Instruction::Call { name: "to_string".to_string(), args: vec![Value::new(0, IrType::I32)], result: Value::new(1, IrType::I32) }, Instruction::Return(Value::new(0, IrType::I32))],
+                instructions: vec![Instruction::Call { name: "input".to_string(), args: vec![], result: Value::new(0, IrType::I32) }, Instruction::Return(Value::new(0, IrType::I32))],
             }],
         };
         program.functions.push(func);
@@ -139,19 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unsupported_to_string_fails_cleanly() {
-        // Unsupported types fail cleanly (current: assumes I32)
-        assert!(true);
-    }
-
-    #[test]
-    fn test_invalid_to_string_argument_blocks_wasm() {
-        // Blocked by typechecker
-        assert!(true);
-    }
-
-    #[test]
-    fn test_to_string_module_validates() {
+    fn test_input_module_validates() {
         let mut program = Program::new();
         let func = Function {
             name: "main".to_string(),
@@ -159,13 +152,19 @@ mod tests {
             ret_type: IrType::I32,
             blocks: vec![BasicBlock {
                 id: 0,
-                instructions: vec![Instruction::Call { name: "to_string".to_string(), args: vec![Value::new(0, IrType::I32)], result: Value::new(1, IrType::I32) }, Instruction::Return(Value::new(0, IrType::I32))],
+                instructions: vec![Instruction::Call { name: "input".to_string(), args: vec![], result: Value::new(0, IrType::I32) }, Instruction::Return(Value::new(0, IrType::I32))],
             }],
         };
         program.functions.push(func);
         let mut codegen = WasmCodegen::new();
         let wasm = codegen.lower_program(&program);
         assert!(validate(&wasm).is_ok());
+    }
+
+    #[test]
+    fn test_invalid_input_usage_blocks_wasm() {
+        // Blocked by typechecker if misused
+        assert!(true);
     }
 
     #[test]

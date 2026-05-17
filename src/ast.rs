@@ -46,6 +46,7 @@ pub struct Function {
     pub params: Vec<(String, Type)>,
     pub ret_type: Type,
     pub body: Vec<Stmt>,
+    pub visibility: Visibility,
 }
 
 #[derive(Debug, Clone)]
@@ -72,4 +73,10 @@ pub enum Decl {
 pub struct Import {
     pub path: String,
     pub alias: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Visibility {
+    Public,
+    Private,
 }

@@ -15,3 +15,5 @@ pub mod native_backend;
 pub mod registry;
 pub mod run;
 pub mod stdlib_core;
+
+// Module system foundation in progress (import resolution, visibility)

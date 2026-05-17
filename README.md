@@ -107,3 +107,115 @@ PHILOSOPHY:
 Rust × Zig × TypeScript × WebAssembly × Controlled Chaos
 
 But built with an original systems-first doctrine.
+COMPILER PIPELINE STATUS
+
+[✓] Lexer
+[✓] Parser
+[~] Type Checker (In Progress)
+
+Lexer:
+- Tokenization
+- Source scanning
+- Symbol recognition
+- Keyword parsing
+- Operator handling
+
+Parser:
+- AST generation
+- Grammar validation
+- Expression parsing
+- Statement parsing
+- Block handling
+
+Type Checker:
+- Static analysis
+- Type inference
+- Constraint validation
+- Symbol resolution
+- Scope enforcement
+- Semantic correctness
+
+This is where the real war begins.
+PHASE I — LANGUAGE CORE
+
+[✓] Lexer
+[✓] Parser
+[ ] Type Checker
+[ ] Semantic Analyzer
+[ ] Intermediate Representation (IR)
+[ ] Optimizer
+[ ] Error Diagnostics Engine
+
+PHASE II — COMPILATION LAYER
+
+[ ] LLVM Backend
+[ ] WASM Target
+[ ] Native Binary Compilation
+[ ] Cross-platform Runtime
+
+PHASE III — SYSTEMS LAYER
+
+[ ] Memory Model
+[ ] Concurrency Model
+[ ] Ownership Strategy
+[ ] Package Manager
+[ ] Standard Library
+[ ] Toolchain CLI
+
+PHASE IV — EXECUTION DOMINATION
+
+[ ] Browser Runtime
+[ ] OS-level Runtime
+[ ] Embedded Runtime
+[ ] Bare Metal Execution
+[ ] VM Strategy
+[ ] Custom Kernel Experimentation
+
+
+fn main() -> int {
+    let message: string = "Hello, World";
+
+    print(message);
+
+    return 0;
+}
+Syntax will evolve.
+
+Architecture will not.
+
+Because building another CRUD app is boring.
+
+Because real engineering is fun.
+
+Because infrastructure matters.
+
+Because languages shape civilizations.
+
+Because some of us are built to create systems —
+not just consume them.
+
+Built by Voss🥷
+
+Builder of systems.
+Creator of protocols.
+Architect of controlled chaos.
+
+Projects:
+- SLIME
+- Axiom
+- Complect
+
+Not here for trends.
+Here for infrastructure.
+
+SLIME is not a weekend project.
+
+It is a long-term systems weapon.
+
+Built slowly.
+Built correctly.
+Built to survive.
+
+If you're reading this early—
+
+you found it before the storm.

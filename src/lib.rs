@@ -4,6 +4,7 @@ pub mod lexer;
 pub mod parser;
 pub mod typechecker;
 pub mod ir;
+pub mod wasm_backend;
 
 pub mod wasm;
 pub mod wasm_binary;

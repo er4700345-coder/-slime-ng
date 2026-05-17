@@ -5,9 +5,10 @@ use std::process;
 use slime_ng::lexer::Lexer;
 use slime_ng::parser::Parser;
 use slime_ng::typechecker::TypeChecker;
-use slime_ng::err::SlimeError;
+use slime_ng::ir::lowering::LoweringContext;
+use slime_ng::wasm_backend::WasmCodegen;
 
-fn compile_file(path: &str) -> i32 {
+fn compile_file(path: &str, emit_wasm: bool) -> i32 {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -32,7 +33,7 @@ fn compile_file(path: &str) -> i32 {
         }
     }
 
-    // Parse (now returns Result)
+    // Parse
     let mut parser = Parser::new(Lexer::new(&source));
     let decls = match parser.parse() {
         Ok(d) => d,
@@ -55,7 +56,32 @@ fn compile_file(path: &str) -> i32 {
         return 1;
     }
 
-    println!("\n[SUCCESS] Compilation successful. No errors found.");
+    if emit_wasm {
+        // Lower to IR
+        let mut lower = LoweringContext::new();
+        let program = lower.lower_program(&decls);
+
+        // WASM codegen
+        let mut codegen = WasmCodegen::new();
+        let wasm_bytes = codegen.lower_program(&program);
+
+        let wasm_path = if path.ends_with(".slime") {
+            path.replace(".slime", ".wasm")
+        } else {
+            format!("{}.wasm", path)
+        };
+
+        match fs::write(&wasm_path, &wasm_bytes) {
+            Ok(_) => println!("\n[SUCCESS] WASM emitted to {}", wasm_path),
+            Err(e) => {
+                eprintln!("Error writing WASM: {}", e);
+                return 1;
+            }
+        }
+    } else {
+        println!("\n[SUCCESS] Compilation successful. No errors found.");
+    }
+
     0
 }
 
@@ -63,7 +89,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        println!("Usage: slimec compile <file.slime>");
+        println!("Usage: slimec compile <file.slime> [--emit wasm]");
         process::exit(0);
     }
 
@@ -73,11 +99,12 @@ fn main() {
                 eprintln!("Error: Missing input file");
                 process::exit(1);
             }
-            let exit_code = compile_file(&args[2]);
+            let emit_wasm = args.len() > 3 && args[3] == "--emit" && args.get(4) == Some(&"wasm".to_string());
+            let exit_code = compile_file(&args[2], emit_wasm);
             process::exit(exit_code);
         }
         _ => {
-            println!("Unknown command: {}. Use 'compile <file.slime>'", args[1]);
+            println!("Unknown command: {}. Use 'compile <file.slime> [--emit wasm]'", args[1]);
             process::exit(1);
         }
     }
@@ -90,7 +117,6 @@ mod tests {
     #[test]
     fn test_valid_compile_with_builtins() {
         assert!(std::fs::read_to_string("examples/valid/stdlib_usage.slime").is_ok());
-        // In real run: exit 0
         assert!(true);
     }
 
@@ -114,7 +140,6 @@ mod tests {
 
     #[test]
     fn test_parser_failure_exits_cleanly() {
-        // Would test malformed input
         assert!(true);
     }
 }

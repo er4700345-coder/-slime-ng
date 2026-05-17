@@ -1,13 +1,69 @@
-# SLIME
+# ⚗️ SLIME — Systems Language for Interactive Multiplatform Execution
 
-**S**ystems **L**anguage for **I**nteractive **M**ultiplatform **E**xecution
+<p align="center">
+  <img src="https://img.shields.io/badge/Language-Systems%20Programming-black?style=for-the-badge&logo=gnubash&logoColor=white" />
+  <img src="https://img.shields.io/badge/Stage-Type%20Checker%20In%20Progress-6f42c1?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Runtime-Browser%20→%20Bare%20Metal-0ea5e9?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Status-Actively%20Built-success?style=for-the-badge" />
+</p>
 
-One language. Every target. Zero compromises.
+<p align="center">
+  <img src="https://img.shields.io/github/license/yourusername/slime?style=flat-square" />
+  <img src="https://img.shields.io/github/stars/yourusername/slime?style=flat-square" />
+  <img src="https://img.shields.io/github/forks/yourusername/slime?style=flat-square" />
+  <img src="https://img.shields.io/github/issues/yourusername/slime?style=flat-square" />
+  <img src="https://img.shields.io/github/last-commit/yourusername/slime?style=flat-square" />
+</p>
 
-Built in Nigeria. For the world.
+---
 
-## Quick Start
+# 🧠 What is SLIME?
+
+**SLIME** (**Systems Language for Interactive Multiplatform Execution**) is an ambitious programming language designed to run across radically different execution environments:
+
+- Browsers
+- Operating Systems
+- Embedded Systems
+- Servers
+- Bare Metal
+- Future custom runtimes
+
+The goal is simple:
+
+> One language. Everywhere.  
+> From frontend execution to kernel-level systems.
+
+Not another toy language.  
+Not another syntax experiment.
+
+A serious systems language built for real execution.
+
+---
+
+# 📁 Project Structure
 
 ```bash
-cargo build --release
-./target/release/slimec build examples/hello.slime
+slime/
+│
+├── lexer/                # Tokenization engine
+├── parser/               # AST generation + syntax parsing
+├── typechecker/          # Static analysis + semantic validation (WIP)
+├── ast/                  # Abstract Syntax Tree definitions
+├── diagnostics/          # Compiler errors + reporting engine
+├── ir/                   # Intermediate Representation layer
+├── optimizer/            # Future optimization passes
+├── runtime/              # Execution model experiments
+├── backend/
+│   ├── llvm/             # Native compilation backend
+│   ├── wasm/             # WebAssembly target
+│   └── native/           # Bare metal / native runtime target
+│
+├── std/                  # Standard library planning
+├── cli/                  # Compiler CLI toolchain
+├── tests/                # Validation + regression tests
+├── docs/                 # Language specifications
+├── examples/             # Sample SLIME programs
+│
+├── Cargo.toml / package config
+├── README.md
+└── LICENSE

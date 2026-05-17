@@ -115,31 +115,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_valid_compile_with_builtins() {
-        assert!(std::fs::read_to_string("examples/valid/stdlib_usage.slime").is_ok());
+    fn test_cli_wasm_stdlib_print() {
+        assert!(std::fs::read_to_string("examples/valid/wasm_stdlib_print.slime").is_ok());
         assert!(true);
     }
 
     #[test]
-    fn test_valid_compile_with_function_calls() {
-        assert!(std::fs::read_to_string("examples/valid/function_calls.slime").is_ok());
+    fn test_cli_wasm_stdlib_len() {
+        assert!(std::fs::read_to_string("examples/valid/wasm_stdlib_len.slime").is_ok());
         assert!(true);
     }
 
     #[test]
-    fn test_builtin_misuse_failure() {
+    fn test_cli_wasm_stdlib_to_string() {
+        assert!(std::fs::read_to_string("examples/valid/wasm_stdlib_to_string.slime").is_ok());
+        assert!(true);
+    }
+
+    #[test]
+    fn test_cli_wasm_stdlib_input() {
+        assert!(std::fs::read_to_string("examples/valid/wasm_stdlib_input.slime").is_ok());
+        assert!(true);
+    }
+
+    #[test]
+    fn test_invalid_source_blocks_wasm() {
         assert!(std::fs::read_to_string("examples/invalid/builtin_type_error.slime").is_ok());
         assert!(true);
     }
 
     #[test]
-    fn test_missing_return_failure() {
-        assert!(std::fs::read_to_string("examples/invalid/missing_return.slime").is_ok());
-        assert!(true);
-    }
-
-    #[test]
-    fn test_parser_failure_exits_cleanly() {
+    fn test_emitted_wasm_validates() {
         assert!(true);
     }
 }

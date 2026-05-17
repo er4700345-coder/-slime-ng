@@ -1,0 +1,4 @@
+fn main() {
+  let l: i32 = len("test");
+  return l;
+}

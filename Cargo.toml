@@ -21,6 +21,7 @@ cranelift-object   = "0.110"
 cranelift-native   = "0.110"
 target-lexicon     = "0.12"
 walrus             = "0.20"
+wasmparser         = "0.200"
 
 [profile.release]
 opt-level = 3

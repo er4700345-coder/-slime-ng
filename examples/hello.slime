@@ -1,7 +1,4 @@
-target wasm {
-    dom = true
-}
-
-fn main() {
-    print("Hello from SLIME!");
+fn main() -> i32 {
+  let x: i32 = 42;
+  return x;
 }

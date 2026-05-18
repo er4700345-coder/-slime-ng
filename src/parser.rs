@@ -1,4 +1,4 @@
-use crate::ast::{self, Decl, Expr, Function, Literal, Stmt, Target, Type};
+use crate::ast::{self, Decl, Expr, Function, Stmt, Target, Type};
 use crate::err::{SlimeError, SourceLocation};
 use crate::lexer::{Lexer, Token};
 
@@ -13,22 +13,33 @@ impl Parser {
         Parser { lexer, current }
     }
 
-    fn advance(&mut self) { self.current = self.lexer.next_token().unwrap_or(Token::EOF); }
+    fn advance(&mut self) {
+        self.current = self.lexer.next_token().unwrap_or(Token::EOF);
+    }
 
     fn expect(&mut self, expected: Token) -> Result<(), SlimeError> {
-        if self.current == expected { self.advance(); Ok(()) }
-        else { Err(SlimeError::ParseError { msg: format!("Expected {:?}, got {:?}", expected, self.current), loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() } }) }
+        if std::mem::discriminant(&self.current) == std::mem::discriminant(&expected) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(SlimeError::ParseError {
+                msg: format!("Expected {:?}, got {:?}", expected, self.current),
+                loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() },
+            })
+        }
     }
 
     fn parse_type(&mut self) -> Result<Type, SlimeError> {
-        match &self.current {
-            Token::I32 => { self.advance(); Ok(Type::I32) }
-            Token::I64 => { self.advance(); Ok(Type::I64) }
-            Token::F64 => { self.advance(); Ok(Type::F64) }
-            Token::Bool => { self.advance(); Ok(Type::Bool) }
-            Token::String => { self.advance(); Ok(Type::String) }
-            _ => Err(SlimeError::ParseError { msg: "Expected type".to_string(), loc: SourceLocation { line: 0, col: 0 } }),
-        }
+        let ty = match &self.current {
+            Token::I32 => Type::I32,
+            Token::I64 => Type::I64,
+            Token::F64 => Type::F64,
+            Token::Bool => Type::Bool,
+            Token::String => Type::String,
+            _ => return Err(SlimeError::ParseError { msg: "Expected type".to_string(), loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() } }),
+        };
+        self.advance();
+        Ok(ty)
     }
 
     fn parse_primary(&mut self) -> Result<Expr, SlimeError> {
@@ -37,17 +48,19 @@ impl Parser {
             Token::Identifier(name) => { let id = name.clone(); self.advance(); Ok(Expr::Identifier(id)) }
             Token::True => { self.advance(); Ok(Expr::Bool(true)) }
             Token::False => { self.advance(); Ok(Expr::Bool(false)) }
-            _ => Err(SlimeError::ParseError { msg: "Unexpected primary".to_string(), loc: SourceLocation { line: 0, col: 0 } }),
+            _ => Err(SlimeError::ParseError { msg: "Unexpected primary".to_string(), loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() } }),
         }
     }
 
-    fn parse_expr(&mut self) -> Result<Expr, SlimeError> { self.parse_primary() }
+    fn parse_expr(&mut self) -> Result<Expr, SlimeError> {
+        self.parse_primary()
+    }
 
     fn parse_stmt(&mut self) -> Result<Stmt, SlimeError> {
         match &self.current {
             Token::Let => {
                 self.advance();
-                let name = if let Token::Identifier(n) = &self.current { n.clone() } else { return Err(SlimeError::ParseError { msg: "Expected name".to_string(), loc: SourceLocation { line: 0, col: 0 } }); };
+                let name = if let Token::Identifier(n) = &self.current { n.clone() } else { return Err(SlimeError::ParseError { msg: "Expected name".to_string(), loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() } }); };
                 self.advance();
                 self.expect(Token::Colon)?;
                 let ty = self.parse_type()?;
@@ -73,31 +86,35 @@ impl Parser {
     fn parse_block(&mut self) -> Result<Vec<Stmt>, SlimeError> {
         self.expect(Token::LBrace)?;
         let mut stmts = Vec::new();
-        while self.current != Token::RBrace && self.current != Token::EOF { stmts.push(self.parse_stmt()?); }
+        while self.current != Token::RBrace && self.current != Token::EOF {
+            stmts.push(self.parse_stmt()?);
+        }
         self.expect(Token::RBrace)?;
         Ok(stmts)
     }
 
     fn parse_function(&mut self) -> Result<Function, SlimeError> {
         self.expect(Token::Fn)?;
-        let name = if let Token::Identifier(n) = &self.current { n.clone() } else { return Err(SlimeError::ParseError { msg: "Expected name".to_string(), loc: SourceLocation { line: 0, col: 0 } }); };
+        let name = if let Token::Identifier(n) = &self.current { n.clone() } else { return Err(SlimeError::ParseError { msg: "Expected name".to_string(), loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() } }); };
         self.advance();
         self.expect(Token::LParen)?;
-        let mut params = vec![];
+        let mut params = Vec::new();
         if self.current != Token::RParen {
-            if let Token::Identifier(p) = &self.current { params.push((p.clone(), Type::I32)); }
+            if let Token::Identifier(pname) = &self.current {
+                params.push((pname.clone(), Type::I32));
+            }
             self.advance();
         }
         self.expect(Token::RParen)?;
         self.expect(Token::Arrow)?;
-        let ret = self.parse_type()?;
+        let ret_type = self.parse_type()?;
         let body = self.parse_block()?;
-        Ok(Function { name, params, ret_type: ret, body })
+        Ok(Function { name, params, ret_type, body })
     }
 
     fn parse_target(&mut self) -> Result<Target, SlimeError> {
         self.expect(Token::Target)?;
-        let name = if let Token::Identifier(n) = &self.current { n.clone() } else { return Err(SlimeError::ParseError { msg: "Expected name".to_string(), loc: SourceLocation { line: 0, col: 0 } }); };
+        let name = if let Token::Identifier(n) = &self.current { n.clone() } else { return Err(SlimeError::ParseError { msg: "Expected name".to_string(), loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() } }); };
         self.advance();
         Ok(Target { name, options: vec![] })
     }
@@ -106,8 +123,8 @@ impl Parser {
         let mut decls = Vec::new();
         while self.current != Token::EOF {
             match &self.current {
-                Token::Fn => { let f = self.parse_function()?; decls.push(Decl::Function(f)); }
-                Token::Target => { let t = self.parse_target()?; decls.push(Decl::Target(t)); }
+                Token::Fn => decls.push(Decl::Function(self.parse_function()?)),
+                Token::Target => decls.push(Decl::Target(self.parse_target()?)),
                 _ => return Err(SlimeError::ParseError { msg: format!("Unexpected token: {:?}", self.current), loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() } }),
             }
         }

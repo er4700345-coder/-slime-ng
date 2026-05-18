@@ -20,7 +20,6 @@ fn compile_file(path: &str, emit_wasm: bool) -> i32 {
     println!("Compiling '{}'
 ", path);
 
-    // Lex
     let mut lexer = Lexer::new(&source);
     loop {
         match lexer.next_token() {
@@ -33,7 +32,6 @@ fn compile_file(path: &str, emit_wasm: bool) -> i32 {
         }
     }
 
-    // Parse
     let mut parser = Parser::new(Lexer::new(&source));
     let decls = match parser.parse() {
         Ok(d) => d,
@@ -43,7 +41,6 @@ fn compile_file(path: &str, emit_wasm: bool) -> i32 {
         }
     };
 
-    // Typecheck
     let mut tc = TypeChecker::new();
     tc.check_program(&decls);
 
@@ -57,11 +54,9 @@ fn compile_file(path: &str, emit_wasm: bool) -> i32 {
     }
 
     if emit_wasm {
-        // Lower to IR
         let mut lower = LoweringContext::new();
         let program = lower.lower_program(&decls);
 
-        // WASM codegen
         let mut codegen = WasmCodegen::new();
         let wasm_bytes = codegen.lower_program(&program);
 

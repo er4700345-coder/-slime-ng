@@ -2,7 +2,7 @@ use crate::ast::{self, Decl, Expr, Function, Stmt, Type};
 use crate::ir::types::{self, BasicBlock, Function as IrFunction, Instruction, IrType, Program, Value};
 
 pub struct LoweringContext {
-    next_value_id: u32,
+    next_value_id: usize,
     var_map: std::collections::HashMap<String, Value>,
 }
 
@@ -45,15 +45,15 @@ impl LoweringContext {
             params.push((name.clone(), ir_ty));
         }
         let ret_ty = self.ast_type_to_ir(&f.ret_type);
-        let mut body = vec![BasicBlock { id: 0, instructions: vec![] }];
+        let mut blocks = vec![BasicBlock { id: 0, instructions: vec![] }];
         for stmt in &f.body {
-            self.lower_stmt(stmt, &mut body[0])?;
+            self.lower_stmt(stmt, &mut blocks[0])?;
         }
         Ok(IrFunction {
             name: f.name.clone(),
             params,
             ret_type: ret_ty,
-            body,
+            blocks,
         })
     }
 
@@ -65,10 +65,10 @@ impl LoweringContext {
             }
             Stmt::Return(Some(expr)) => {
                 let val = self.lower_expr(expr, block)?;
-                block.instructions.push(Instruction::Return(Some(val)));
+                block.instructions.push(Instruction::Return(val));
             }
             Stmt::Return(None) => {
-                block.instructions.push(Instruction::Return(None));
+                // void return - emit nothing or a special instruction if needed
             }
             Stmt::Expr(expr) => {
                 let _ = self.lower_expr(expr, block)?;
@@ -82,7 +82,7 @@ impl LoweringContext {
         match expr {
             Expr::Integer(n) => {
                 let val = self.fresh_value(IrType::I32);
-                block.instructions.push(Instruction::Literal(val.clone(), format!("{}", n)));
+                block.instructions.push(Instruction::Literal(val.clone()));
                 Ok(val)
             }
             Expr::Identifier(name) => {

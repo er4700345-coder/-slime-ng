@@ -22,10 +22,7 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(SlimeError::ParseError {
-                msg: format!("Expected {:?}, got {:?}", expected, self.current),
-                loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() },
-            })
+            Err(SlimeError::ParseError { msg: format!("Expected {:?}, got {:?}", expected, self.current), loc: SourceLocation { line: self.lexer.line(), col: self.lexer.col() } })
         }
     }
 
@@ -100,9 +97,7 @@ impl Parser {
         self.expect(Token::LParen)?;
         let mut params = Vec::new();
         if self.current != Token::RParen {
-            if let Token::Identifier(pname) = &self.current {
-                params.push((pname.clone(), Type::I32));
-            }
+            if let Token::Identifier(pname) = &self.current { params.push((pname.clone(), Type::I32)); }
             self.advance();
         }
         self.expect(Token::RParen)?;

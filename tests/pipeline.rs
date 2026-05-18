@@ -11,10 +11,11 @@ fn test_hello_pipeline() {
     let decls = parser.parse().expect("parse failed");
     
     let mut checker = TypeChecker::new();
-    checker.check(&decls).expect("typecheck failed");
+    checker.check_program(&decls).expect("typecheck failed");
+    assert!(!checker.has_errors());
     
     let mut lower = LoweringContext::new();
-    let ir = lower.lower(&decls).expect("lowering failed");
+    let ir = lower.lower_program(&decls).expect("lowering failed");
     
     assert!(!ir.is_empty());
     println!("Pipeline success: {} decls parsed and lowered", decls.len());

@@ -11,8 +11,8 @@ fn test_hello_pipeline() {
     let decls = parser.parse().expect("parse failed");
     
     let mut checker = TypeChecker::new();
-    checker.check_program(&decls).expect("typecheck failed");
-    assert!(!checker.has_errors());
+    checker.check_program(&decls);
+    assert!(!checker.has_errors(), "type errors: {:?}", checker.get_errors());
     
     let mut lower = LoweringContext::new();
     let ir = lower.lower_program(&decls).expect("lowering failed");
